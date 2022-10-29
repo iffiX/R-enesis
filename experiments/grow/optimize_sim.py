@@ -58,7 +58,7 @@ config = {
         ],
         "post_fcnet_hiddens": [128, None],
     },
-    "callbacks": CustomCallbacks,
+    # "callbacks": CustomCallbacks,
 }
 
 if __name__ == "__main__":
@@ -69,6 +69,6 @@ if __name__ == "__main__":
         checkpoint_freq=1,
         keep_checkpoints_num=2,
         stop={"timesteps_total": 100000, "episodes_total": 10000},
-        callbacks=[DataLoggerCallback()]
+        # callbacks=[DataLoggerCallback()]
         # restore=,
     )
