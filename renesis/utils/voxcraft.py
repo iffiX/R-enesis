@@ -5,7 +5,6 @@ from typing import List, Tuple
 def vxd_creator(
     sizes: Tuple[int, int, int],
     representation: List[Tuple[List[int], List[float], List[float], List[float]]],
-    file_path: str = None,
     record_history=True,
 ):
     """
@@ -45,12 +44,7 @@ def vxd_creator(
         etree.SubElement(history, "RecordLink").text = "0"
         etree.SubElement(history, "RecordFixedVoxels").text = "0"
 
-    file_content = etree.tostring(VXD, pretty_print=True).decode("utf-8")
-    if file_path is not None:
-        with open(file_path, "w") as f:
-            print(file_content, file=f)
-
-    return file_content
+    return etree.tostring(VXD, pretty_print=True).decode("utf-8")
 
 
 def get_voxel_positions(out_file_path, voxel_size=0.01):

@@ -4,11 +4,10 @@ import gym
 import numpy as np
 from uuid import uuid4
 from gym.spaces import Box
-from renesis.sim import voxcraft_bin_path
+from renesis.sim import Voxcraft
 from renesis.utils.voxcraft import vxd_creator, get_voxel_positions
 from renesis.utils.fitness import max_z, table, distance_traveled, has_fallen
 from renesis.entities.growth_function import GrowthFunction
-import subprocess
 
 
 class VoxcraftGrowthEnvironment(gym.Env):

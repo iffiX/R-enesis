@@ -51,7 +51,7 @@ print("Source code downloaded.")
 
 !cd voxcraft-sim; rm build -rf; mkdir build; cd build; cmake ..; make -j 10;
 
-print("Executables built.")
+print("executables built.")
 
 !cd voxcraft-sim/build; ./voxcraft-sim -i ../demos/basic/ -o output.xml -f > ../../a.history
 
@@ -112,3 +112,4 @@ If you need to cite our work, here is the format:
 }
 ```
 [![DOI](https://zenodo.org/badge/265434971.svg)](https://zenodo.org/badge/latestdoi/265434971)
+# voxcraft-sim
