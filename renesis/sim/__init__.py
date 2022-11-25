@@ -41,7 +41,7 @@ def build_module(src_path, build_path, ignore_build_error=False):
             ]
         )
         subprocess.call(["make", "-C", build_path, "clean"])
-        if subprocess.call(["make", "-C", build_path, "-j4"]) != 0:
+        if subprocess.call(["make", "-C", build_path, "-j9"]) != 0:
             if not ignore_build_error:
                 raise RuntimeError("Make failed")
             else:
@@ -70,7 +70,9 @@ _voxcraft_viz_build_path = str(os.path.join(_dir_path, "build_viz"))
 sys.path.append(_voxcraft_src_path)
 sys.path.append(_voxcraft_viz_src_path)
 
-build_module(_voxcraft_src_path, _voxcraft_build_path, True)
+build_module(_voxcraft_src_path, _voxcraft_build_path)
 build_module(_voxcraft_viz_src_path, _voxcraft_viz_build_path)
+_vx = importlib.import_module("voxcraft")
 _vxz = importlib.import_module("voxcraft_viz")
+Voxcraft = _vx.Voxcraft
 VXHistoryRenderer = _vxz.VXHistoryRenderer

@@ -2,8 +2,8 @@ import os
 import gym
 import numpy as np
 from torch import nn
-from collections import defaultdict
 from typing import List, Dict, Tuple
+from ray.tune import Callback
 from ray.tune.logger import LoggerCallback
 from ray.tune.result import TIMESTEPS_TOTAL, TRAINING_ITERATION
 from ray.rllib.models.torch.misc import (
@@ -17,6 +17,7 @@ from ray.rllib.utils.annotations import override
 from ray.rllib.utils.typing import ModelConfigDict, TensorType
 from ray.rllib.models.utils import get_activation_fn
 from renesis.env.voxcraft import VoxcraftGrowthEnvironment
+from renesis.utils.sys_debug import print_model_size
 from renesis.utils.media import create_video_subproc
 from renesis.sim import VXHistoryRenderer
 
@@ -84,7 +85,9 @@ class Actor(TorchModelV2, nn.Module):
                 SlimFC(
                     in_size=out_channels,
                     out_size=out_size,
-                    activation_fn=post_fcnet_activation,
+                    activation_fn=post_fcnet_activation
+                    if i < len(layer_sizes) - 1
+                    else None,
                     initializer=normc_initializer(1.0),
                 )
             )
@@ -92,11 +95,15 @@ class Actor(TorchModelV2, nn.Module):
 
         self.layers = nn.Sequential(*layers)
 
-        self.value_branch = SlimFC(
-            out_channels, 1, initializer=normc_initializer(0.01), activation_fn=None
+        self.value_branch = nn.Sequential(
+            post_fcnet_activation(),
+            SlimFC(
+                out_channels, 1, initializer=normc_initializer(0.01), activation_fn=None
+            ),
         )
 
         self._action = None
+        print_model_size(self)
 
     @override(TorchModelV2)
     def forward(
@@ -160,24 +167,7 @@ class Actor(TorchModelV2, nn.Module):
 
 class CustomCallbacks(DefaultCallbacks):
     def on_episode_start(self, *, worker, base_env, policies, episode, **kwargs):
-        episode.media["episode_data"] = defaultdict(list)
-        # episode.user_data = {"final": {}, "running": defaultdict(list)}
-
-    # def on_episode_step(self, *, worker, base_env, episode, **kwargs):
-    #     # Running metrics -> keep all values
-    #     # Final metrics -> only keep the current value
-    #     for data_type, data_subset in episode.user_data.items():
-    #         data = episode.last_info_for().get("data", {}).get(data_type)
-    #         for name, value in data.items():
-    #             if data_type == "running":
-    #                 data_subset[name].append(value)
-    #             else:
-    #                 data_subset[name] = value
-    #
-    #     # Arbitrary episode media
-    #     media = episode.last_info_for().get("media", {})
-    #     for name, value in media.items():
-    #         episode.media["episode_data"][name].append(value)
+        episode.media["episode_data"] = {}
 
     def on_episode_end(self, *, worker, base_env, policies, episode, **kwargs):
         # Render the robot simulation
@@ -187,9 +177,23 @@ class CustomCallbacks(DefaultCallbacks):
         )
         renderer.render()
         frames = renderer.get_frames()
-        episode.media["episode_data"]["frames"] = frames
-        episode.media["episode_data"]["robot"] = env.robot
-        episode.media["episode_data"]["robot_sim_history"] = env.robot_sim_history
+        if frames.ndim == 4:
+            episode.media["episode_data"]["frames"] = frames
+            episode.media["episode_data"]["robot"] = env.robot
+            episode.media["episode_data"]["robot_sim_history"] = env.robot_sim_history
+        else:
+            print("Error: No frames produced")
+            print("History:")
+            print(env.robot_sim_history)
+
+    def on_train_result(self, *, algorithm, result, trainer, **kwargs,) -> None:
+        num_episodes = result["episodes_this_iter"]
+        data = result["episode_media"].get("episode_data", [])
+        episode_data = data[-num_episodes:]
+
+        if "evaluation" in result:
+            data = result["evaluation"]["episode_media"].get("episode_data", [])
+            episode_data += data[-num_episodes:]
 
         # Summary writer requires video to be in (N, T, C, H, W) shape
 
@@ -200,9 +204,14 @@ class CustomCallbacks(DefaultCallbacks):
         # 0452a3a435e023eada85f670e70ffef02ceb5943/python/ray/tune/logger.py#L212
 
         # T H W C to T C H W, then add batch dimension
-        # episode.custom_metrics["frames"] = np.expand_dims(
-        #     np.transpose(frames, axes=(0, 3, 1, 2)), 0
-        # )
+        if len(data) > 0:
+            result["custom_metrics"].update(
+                {
+                    "video": np.expand_dims(
+                        np.transpose(episode_data[-1]["frames"], (0, 3, 1, 2),), axis=0,
+                    )
+                }
+            )
 
 
 class DataLoggerCallback(LoggerCallback):
@@ -216,38 +225,59 @@ class DataLoggerCallback(LoggerCallback):
         os.makedirs(self._trial_local_dir[trial], exist_ok=True)
 
     def log_trial_result(self, iteration, trial, result):
-        if "episode_data" not in result["episode_media"]:
-            return
-
         step = result.get(TIMESTEPS_TOTAL) or result[TRAINING_ITERATION]
-
         num_episodes = result["episodes_this_iter"]
-        data = result["episode_media"]["episode_data"]
+
+        data = result["episode_media"].get("episode_data", [])
         episode_data = data[-num_episodes:]
 
         if "evaluation" in result:
-            data = result["evaluation"]["episode_media"]["episode_data"]
+            data = result["evaluation"]["episode_media"].get("episode_data", [])
             episode_data += data[-num_episodes:]
 
-        # Save a video only for the last episode in the list
-        path = os.path.join(self._trial_local_dir[trial], f"rendered_{step:08d}.gif")
-        print(f"Saving rendered results to {path}")
-        wait = create_video_subproc(
-            [f for f in episode_data[-1]["frames"]],
-            path=self._trial_local_dir[trial],
-            filename=f"rendered_{step:08d}",
-            extension=".gif",
-        )
-        path = os.path.join(self._trial_local_dir[trial], f"robot-{step:08d}.vxd")
-        with open(path, "w") as file:
-            print(f"Saving simulation config to {path}")
-            file.write(episode_data[-1]["robot"])
-        path = os.path.join(self._trial_local_dir[trial], f"run-{step:08d}.history")
-        with open(path, "w") as file:
-            print(f"Saving history to {path}")
-            file.write(episode_data[-1]["robot_sim_history"])
-        wait()
+        if len(episode_data) > 0:
+            # Save a video only for the last episode in the list
+            path = os.path.join(
+                self._trial_local_dir[trial], f"rendered_{step:08d}.gif"
+            )
+            print(f"Saving rendered results to {path}")
+            wait = create_video_subproc(
+                [f for f in episode_data[-1]["frames"]],
+                path=self._trial_local_dir[trial],
+                filename=f"rendered_{step:08d}",
+                extension=".gif",
+            )
+            path = os.path.join(self._trial_local_dir[trial], f"robot-{step:08d}.vxd")
+            with open(path, "w") as file:
+                print(f"Saving simulation config to {path}")
+                file.write(episode_data[-1]["robot"])
+            path = os.path.join(self._trial_local_dir[trial], f"run-{step:08d}.history")
+            with open(path, "w") as file:
+                print(f"Saving history to {path}")
+                file.write(episode_data[-1]["robot_sim_history"])
+            wait()
+        # Clear results to reduce load on checkpointing
         print("Saving completed")
+
+
+class CleaningCallback1(Callback):
+    def on_trial_result(self, iteration: int, trials, trial, result, **info):
+        result["episode_media"] = {}
+        if "evaluation" in result:
+            result["evaluation"]["episode_media"] = {}
+        if "sampler_results" in result:
+            result["sampler_results"]["episode_media"] = {}
+        print("Cleaning 1 completed")
+
+
+class CleaningCallback2(Callback):
+    def on_trial_result(self, iteration: int, trials, trial, result, **info):
+        result["custom_metrics"] = {}
+        if "evaluation" in result:
+            result["evaluation"]["custom_metrics"] = {}
+        if "sampler_results" in result:
+            result["sampler_results"]["custom_metrics"] = {}
+        print("Cleaning 2 completed")
 
 
 ModelCatalog.register_custom_model("actor_model", Actor)

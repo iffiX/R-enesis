@@ -128,6 +128,8 @@ class VoxcraftGrowthEnvironment(gym.Env):
                 reward = table(final_positions)
         elif self.reward_type == "distance_traveled":
             reward = distance_traveled(initial_positions, final_positions)
+            if reward < 1e-3:
+                reward = 0
         else:
             raise Exception("Unknown reward type: {self.reward_type}")
         print(reward)

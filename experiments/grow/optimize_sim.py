@@ -2,16 +2,23 @@ import os
 import ray
 import numpy as np
 from ray import tune
+from ray.tune.logger import TBXLoggerCallback
 from ray.rllib.agents.ppo import PPOTrainer
 from renesis.env.voxcraft import VoxcraftGrowthEnvironment
-from experiments.grow.utils import CustomCallbacks, DataLoggerCallback
+from experiments.grow.utils import (
+    CustomCallbacks,
+    DataLoggerCallback,
+    CleaningCallback1,
+    CleaningCallback2,
+)
 
 """
 IMPORTANT: You MUST configure data/base.vxa to match the relevant
 configurations in this file.
 """
 
-ray.init()
+# 5GB heap memory, 1GB object store
+ray.init(_memory=5 * (10 ** 9), object_store_memory=10 ** 9)
 
 config = {
     "env": VoxcraftGrowthEnvironment,
@@ -32,10 +39,10 @@ config = {
         "fallen_threshold": 0.25,
     },
     "sgd_minibatch_size": 4,
-    "train_batch_size": 20,
+    "train_batch_size": 8,
     "vf_clip_param": 10 ** 5,
     "seed": np.random.randint(10 ** 5),
-    "num_workers": 2,
+    "num_workers": 1,
     "num_gpus": 0.2,
     "num_gpus_per_worker": 0.2,
     "num_envs_per_worker": 1,
@@ -58,7 +65,7 @@ config = {
         ],
         "post_fcnet_hiddens": [128, None],
     },
-    # "callbacks": CustomCallbacks,
+    "callbacks": CustomCallbacks,
 }
 
 if __name__ == "__main__":
@@ -69,6 +76,13 @@ if __name__ == "__main__":
         checkpoint_freq=1,
         keep_checkpoints_num=2,
         stop={"timesteps_total": 100000, "episodes_total": 10000},
-        # callbacks=[DataLoggerCallback()]
+        # Order is important! We want to log videos but not letting
+        # loggers automatically added by ray.tune to see it
+        callbacks=[
+            DataLoggerCallback(),
+            CleaningCallback1(),
+            TBXLoggerCallback(),
+            CleaningCallback2(),
+        ]
         # restore=,
     )

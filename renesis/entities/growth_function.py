@@ -3,6 +3,10 @@ from typing import Tuple
 from collections import deque
 
 
+def sigmoid(x: np.ndarray):
+    return 1 / (1 + np.exp(-x))
+
+
 class GrowthFunction:
     """Generate patterns given patterns.
 
@@ -72,6 +76,7 @@ class GrowthFunction:
 
     def step(self, configuration: np.ndarray):
         """Add one configuration."""
+        configuration = sigmoid(configuration)
         configuration = self.mask_configuration(configuration)
         voxel = self.body.pop()
         self.attach_voxels(configuration, voxel)
@@ -177,8 +182,10 @@ class GrowthFunction:
             )
         ):
             pos = voxel + offset
-            if np.all(np.array((self.radius,) * 3) <= pos) and np.all(
-                np.array((self.max_dimension_size + self.radius,) * 3) > offset
+            if (
+                np.all(np.array((self.radius,) * 3) <= pos)
+                and np.all(np.array((self.max_dimension_size + self.radius,) * 3) > pos)
+                and not self.occupied[pos[0], pos[1], pos[2]]
             ):
                 valid_position_indices.append(idx)
         return valid_position_indices
@@ -244,11 +251,14 @@ class GrowthFunction:
         self.occupied_positions.append(coordinates.tolist())
         self.occupied_values.append(material)
         self.num_voxels += 1
+        self.voxels[coordinates[0], coordinates[1], coordinates[2], 0] = material
+        self.occupied[coordinates[0], coordinates[1], coordinates[2]] = True
+
+        # Only store actuation data if a non-0 voxel is attached
         if material != 0:
             self.num_non_zero_voxel += 1
-        self.voxels[coordinates[0], coordinates[1], coordinates[2], 0] = material
-        self.voxels[coordinates[0], coordinates[1], coordinates[2], 1:] = actuation
-        self.occupied[coordinates[0], coordinates[1], coordinates[2]] = True
+            self.voxels[coordinates[0], coordinates[1], coordinates[2], 1:] = actuation
+
         self.body.appendleft(coordinates)
         # print(f"New voxel at {coordinates}, material {material}, actuation {actuation}")
 
