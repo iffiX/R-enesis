@@ -1,6 +1,9 @@
 import numpy as np
 from typing import Tuple
 from collections import deque
+import sys
+
+np.set_printoptions(precision=4, threshold=sys.maxsize)
 
 
 def sigmoid(x: np.ndarray):
@@ -17,7 +20,11 @@ class GrowthFunction:
     """
 
     def __init__(
-        self, materials=(0, 1, 2), max_dimension_size=50, max_view_size=21,
+        self,
+        materials=(0, 1, 2),
+        max_dimension_size=50,
+        max_view_size=21,
+        actuation_features=("amplitude", "frequency", "phase_offset"),
     ):
         if max_dimension_size < 5:
             raise ValueError(
@@ -28,9 +35,13 @@ class GrowthFunction:
             raise ValueError(
                 f"Max view size must be an odd number, got {max_view_size}"
             )
+        for a in actuation_features:
+            assert a in ("amplitude", "frequency", "phase_offset")
+        assert len(actuation_features) > 0
         self.materials = materials
         self.max_dimension_size = max_dimension_size
         self.max_view_size = max_view_size
+        self.actuation_features = actuation_features
 
         self.radius = self.max_view_size // 2
         self.actual_dimension_size = max_dimension_size + self.radius * 2
@@ -48,14 +59,17 @@ class GrowthFunction:
 
     @property
     def action_shape(self):
-        return 6, len(self.materials), 4
+        return 6, len(self.materials), 1 + len(self.actuation_features)
 
     @property
     def view_shape(self):
-        return (self.max_view_size,) * 3 + (4,)
+        return (self.max_view_size,) * 3 + (1 + len(self.actuation_features),)
 
     def reset(self):
-        self.voxels = np.zeros([self.actual_dimension_size] * 3 + [4], dtype=float)
+        self.voxels = np.zeros(
+            [self.actual_dimension_size] * 3 + [1 + len(self.actuation_features)],
+            dtype=float,
+        )
         self.occupied = np.zeros([self.actual_dimension_size] * 3, dtype=bool)
         self.occupied_positions = []
         self.occupied_values = []
@@ -86,20 +100,24 @@ class GrowthFunction:
         """
         Get local view using the first voxel in queue as the center.
         Returns:
-            Numpy float array of shape [max_view_size, max_view_size, max_view_size, 4]
+            Numpy float array of shape [max_view_size, max_view_size, max_view_size, 1 + actuation_features_num]
         """
         if len(self.body) == 0:
-            return np.zeros((self.max_view_size,) * 3 + (4,))
+            return np.zeros(
+                (self.max_view_size,) * 3 + (1 + len(self.actuation_features),)
+            )
         voxel = self.body[-1]
         radius = self.max_view_size // 2
         starts = voxel - radius
         ends = voxel + radius + 1
-        return self.voxels[
-            starts[0] : ends[0], starts[1] : ends[1], starts[2] : ends[2]
-        ]
+        out = np.copy(
+            self.voxels[starts[0] : ends[0], starts[1] : ends[1], starts[2] : ends[2]]
+        )
+        out[:, :, :, 0] /= max(self.materials)
+        return out
 
     def get_representation(
-        self, amplitude_range=None, frequency_range=None, phase_shift_range=None
+        self, amplitude_range=None, frequency_range=None, phase_offset_range=None
     ):
         """
         Returns:
@@ -111,7 +129,7 @@ class GrowthFunction:
         """
         amplitude_range = amplitude_range or (0, 1)
         frequency_range = frequency_range or (0, 1)
-        phase_shift_range = phase_shift_range or (-1, 1)
+        phase_offset_range = phase_offset_range or (-1, 1)
         x_occupied = [
             x for x in range(self.occupied.shape[0]) if np.any(self.occupied[x])
         ]
@@ -136,20 +154,44 @@ class GrowthFunction:
                 .flatten(order="F")
                 .tolist(),
                 self.rescale(
-                    self.voxels[min_x:max_x, min_y:max_y, z, 1], amplitude_range
+                    self.voxels[
+                        min_x:max_x,
+                        min_y:max_y,
+                        z,
+                        1 + self.actuation_features.index("amplitude"),
+                    ],
+                    amplitude_range,
                 )
                 .flatten(order="F")
-                .tolist(),
+                .tolist()
+                if "amplitude" in self.actuation_features
+                else None,
                 self.rescale(
-                    self.voxels[min_x:max_x, min_y:max_y, z, 2], frequency_range
+                    self.voxels[
+                        min_x:max_x,
+                        min_y:max_y,
+                        z,
+                        1 + self.actuation_features.index("frequency"),
+                    ],
+                    frequency_range,
                 )
                 .flatten(order="F")
-                .tolist(),
+                .tolist()
+                if "frequency" in self.actuation_features
+                else None,
                 self.rescale(
-                    self.voxels[min_x:max_x, min_y:max_y, z, 3], phase_shift_range
+                    self.voxels[
+                        min_x:max_x,
+                        min_y:max_y,
+                        z,
+                        1 + self.actuation_features.index("phase_offset"),
+                    ],
+                    phase_offset_range,
                 )
                 .flatten(order="F")
-                .tolist(),
+                .tolist()
+                if "phase_offset" in self.actuation_features
+                else None,
             )
             representation.append(layer_representation)
         return (max_x - min_x, max_y - min_y, max_z - min_z), representation
@@ -204,6 +246,7 @@ class GrowthFunction:
             Directions order: "negative_x", "positive_x", "negative_y",
                 "positive_y", "negative_z", "positive_z",
         """
+        # print(configuration)
         for direction in range(6):
             if np.all(configuration[direction, :, 0] == 0):
                 continue
@@ -255,11 +298,12 @@ class GrowthFunction:
         self.occupied[coordinates[0], coordinates[1], coordinates[2]] = True
 
         # Only store actuation data if a non-0 voxel is attached
+        # Since we can only attach new voxels to a non-0 voxel, only append
+        # it to the body queue when voxel is not 0.
         if material != 0:
             self.num_non_zero_voxel += 1
             self.voxels[coordinates[0], coordinates[1], coordinates[2], 1:] = actuation
-
-        self.body.appendleft(coordinates)
+            self.body.appendleft(coordinates)
         # print(f"New voxel at {coordinates}, material {material}, actuation {actuation}")
 
     @staticmethod

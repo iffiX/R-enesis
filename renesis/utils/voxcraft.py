@@ -23,18 +23,35 @@ def vxd_creator(
     etree.SubElement(Structure, "Z_Voxels").text = f"{sizes[2]}"
 
     Data = etree.SubElement(Structure, "Data")
-    amplitudes = etree.SubElement(Structure, "Amplitude")
-    frequencies = etree.SubElement(Structure, "Frequency")
-    phase_offsets = etree.SubElement(Structure, "PhaseOffset")
+    if representation[0][1] is not None:
+        amplitudes = etree.SubElement(Structure, "Amplitude")
+    else:
+        amplitudes = None
+    if representation[0][2] is not None:
+        frequencies = etree.SubElement(Structure, "Frequency")
+    else:
+        frequencies = None
+    if representation[0][3] is not None:
+        phase_offsets = etree.SubElement(Structure, "PhaseOffset")
+    else:
+        phase_offsets = None
     for z in range(sizes[2]):
         material_data = "".join([f"{m}" for m in representation[z][0]])
-        amplitude_data = "".join([f"{p}, " for p in representation[z][1]])
-        frequency_data = "".join([f"{p}, " for p in representation[z][2]])
-        phase_offset_data = "".join([f"{p}, " for p in representation[z][3]])
         etree.SubElement(Data, "Layer").text = etree.CDATA(material_data)
-        etree.SubElement(amplitudes, "Layer").text = etree.CDATA(amplitude_data)
-        etree.SubElement(frequencies, "Layer").text = etree.CDATA(frequency_data)
-        etree.SubElement(phase_offsets, "Layer").text = etree.CDATA(phase_offset_data)
+
+        if representation[z][1] is not None:
+            amplitude_data = "".join([f"{p}, " for p in representation[z][1]])
+            etree.SubElement(amplitudes, "Layer").text = etree.CDATA(amplitude_data)
+
+        if representation[z][2] is not None:
+            frequency_data = "".join([f"{p}, " for p in representation[z][2]])
+            etree.SubElement(frequencies, "Layer").text = etree.CDATA(frequency_data)
+
+        if representation[z][3] is not None:
+            phase_offset_data = "".join([f"{p}, " for p in representation[z][3]])
+            etree.SubElement(phase_offsets, "Layer").text = etree.CDATA(
+                phase_offset_data
+            )
 
     if record_history:
         history = etree.SubElement(VXD, "RecordHistory")
@@ -47,8 +64,8 @@ def vxd_creator(
     return etree.tostring(VXD, pretty_print=True).decode("utf-8")
 
 
-def get_voxel_positions(out_file_path, voxel_size=0.01):
-    doc = etree.parse(out_file_path)
+def get_voxel_positions(result, voxel_size=0.01):
+    doc = etree.fromstring(bytes(result, encoding="utf-8"))
 
     def parse(x):
         y = x.split(";")
@@ -58,6 +75,6 @@ def get_voxel_positions(out_file_path, voxel_size=0.01):
                 p.append([float(q) / voxel_size for q in v.split(",")])
         return p
 
-    initial_positions = doc.xpath("/report/detail/robot/init_pos")[0].text
-    final_positions = doc.xpath("/report/detail/robot/pos")[0].text
+    initial_positions = doc.xpath("/report/detail/voxel_initial_positions")[0].text
+    final_positions = doc.xpath("/report/detail/voxel_final_positions")[0].text
     return parse(initial_positions), parse(final_positions)

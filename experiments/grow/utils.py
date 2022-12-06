@@ -22,6 +22,26 @@ from renesis.utils.media import create_video_subproc
 from renesis.sim import VXHistoryRenderer
 
 
+def render(history):
+    try:
+        renderer = VXHistoryRenderer(history=history, width=640, height=480)
+        renderer.render()
+        frames = renderer.get_frames()
+        if frames.ndim == 4:
+            print("History saved")
+            return frames
+        else:
+            print("Rendering finished, but no frames produced")
+            print("History:")
+            print(history)
+            return None
+    except:
+        print("Exception occurred, no frames produced")
+        print("History:")
+        print(history)
+        return None
+
+
 class Actor(TorchModelV2, nn.Module):
     def __init__(
         self,
@@ -80,8 +100,12 @@ class Actor(TorchModelV2, nn.Module):
         layer_sizes = post_fcnet_hiddens[:-1] + (
             [num_outputs] if post_fcnet_hiddens else []
         )
+        shared_base_output_channels = out_channels
+        self.shared_base_layers = nn.Sequential(*layers)
+
+        action_layers = []
         for i, out_size in enumerate(layer_sizes):
-            layers.append(
+            action_layers.append(
                 SlimFC(
                     in_size=out_channels,
                     out_size=out_size,
@@ -92,17 +116,21 @@ class Actor(TorchModelV2, nn.Module):
                 )
             )
             out_channels = out_size
+        self.action_layers = nn.Sequential(*action_layers)
 
-        self.layers = nn.Sequential(*layers)
-
-        self.value_branch = nn.Sequential(
+        self.value_layers = nn.Sequential(
             post_fcnet_activation(),
             SlimFC(
-                out_channels, 1, initializer=normc_initializer(0.01), activation_fn=None
+                shared_base_output_channels,
+                256,
+                initializer=normc_initializer(0.01),
+                activation_fn=None,
             ),
+            SlimFC(256, 128, initializer=normc_initializer(0.01), activation_fn=None),
+            SlimFC(128, 1, initializer=normc_initializer(0.01), activation_fn=None),
         )
 
-        self._action = None
+        self._shared_base_output = None
         print_model_size(self)
 
     @override(TorchModelV2)
@@ -119,13 +147,13 @@ class Actor(TorchModelV2, nn.Module):
         # and comes out as [B, channels, x, y, z]
         input_features = input_features.permute(0, 4, 1, 2, 3)
 
-        out = self.layers(input_features)
-        self._action = out
-        return out, state
+        self._shared_base_output = self.shared_base_layers(input_features)
+        action = self.action_layers(self._shared_base_output)
+        return action, state
 
     @override(TorchModelV2)
     def value_function(self) -> TensorType:
-        return self.value_branch(self._action).squeeze(1)
+        return self.value_layers(self._shared_base_output).squeeze(1)
 
     @staticmethod
     def get_padding_and_output_size(
@@ -171,20 +199,11 @@ class CustomCallbacks(DefaultCallbacks):
 
     def on_episode_end(self, *, worker, base_env, policies, episode, **kwargs):
         # Render the robot simulation
-        env = base_env.get_sub_environments()[0]  # type: VoxcraftGrowthEnvironment
-        renderer = VXHistoryRenderer(
-            history=env.robot_sim_history, width=640, height=480
-        )
-        renderer.render()
-        frames = renderer.get_frames()
-        if frames.ndim == 4:
-            episode.media["episode_data"]["frames"] = frames
-            episode.media["episode_data"]["robot"] = env.robot
-            episode.media["episode_data"]["robot_sim_history"] = env.robot_sim_history
-        else:
-            print("Error: No frames produced")
-            print("History:")
-            print(env.robot_sim_history)
+        env = base_env.vector_env  # type: VoxcraftGrowthEnvironment
+        robot = env.robots[0]
+        history = env.robot_sim_histories[0]
+        episode.media["episode_data"]["robot"] = robot
+        episode.media["episode_data"]["robot_sim_history"] = history
 
     def on_train_result(self, *, algorithm, result, trainer, **kwargs,) -> None:
         num_episodes = result["episodes_this_iter"]
@@ -203,15 +222,20 @@ class CustomCallbacks(DefaultCallbacks):
         # See https://github.com/ray-project/ray/blob/
         # 0452a3a435e023eada85f670e70ffef02ceb5943/python/ray/tune/logger.py#L212
 
+        # Disabled due to OOM issues
         # T H W C to T C H W, then add batch dimension
-        if len(data) > 0:
-            result["custom_metrics"].update(
-                {
-                    "video": np.expand_dims(
-                        np.transpose(episode_data[-1]["frames"], (0, 3, 1, 2),), axis=0,
-                    )
-                }
-            )
+        # if len(data) > 0:
+        #     # Only render the last episode
+        #     history = episode_data[-1]["robot_sim_history"]
+        #     frames = render(history)
+        #     if frames is not None:
+        #         result["custom_metrics"].update(
+        #             {
+        #                 "video": np.expand_dims(
+        #                     np.transpose(frames, (0, 3, 1, 2),), axis=0,
+        #                 )
+        #             }
+        #         )
 
 
 class DataLoggerCallback(LoggerCallback):
@@ -237,25 +261,33 @@ class DataLoggerCallback(LoggerCallback):
 
         if len(episode_data) > 0:
             # Save a video only for the last episode in the list
-            path = os.path.join(
-                self._trial_local_dir[trial], f"rendered_{step:08d}.gif"
-            )
-            print(f"Saving rendered results to {path}")
-            wait = create_video_subproc(
-                [f for f in episode_data[-1]["frames"]],
-                path=self._trial_local_dir[trial],
-                filename=f"rendered_{step:08d}",
-                extension=".gif",
-            )
-            path = os.path.join(self._trial_local_dir[trial], f"robot-{step:08d}.vxd")
-            with open(path, "w") as file:
-                print(f"Saving simulation config to {path}")
-                file.write(episode_data[-1]["robot"])
-            path = os.path.join(self._trial_local_dir[trial], f"run-{step:08d}.history")
-            with open(path, "w") as file:
-                print(f"Saving history to {path}")
-                file.write(episode_data[-1]["robot_sim_history"])
-            wait()
+            robot = episode_data[-1]["robot"]
+            history = episode_data[-1]["robot_sim_history"]
+            frames = render(history)
+            if frames is not None:
+                path = os.path.join(
+                    self._trial_local_dir[trial], f"rendered_{step:08d}.gif"
+                )
+                print(f"Saving rendered results to {path}")
+                wait = create_video_subproc(
+                    [f for f in frames],
+                    path=self._trial_local_dir[trial],
+                    filename=f"rendered_{step:08d}",
+                    extension=".gif",
+                )
+                path = os.path.join(
+                    self._trial_local_dir[trial], f"robot-{step:08d}.vxd"
+                )
+                with open(path, "w") as file:
+                    print(f"Saving robot to {path}")
+                    file.write(robot)
+                path = os.path.join(
+                    self._trial_local_dir[trial], f"run-{step:08d}.history"
+                )
+                with open(path, "w") as file:
+                    print(f"Saving history to {path}")
+                    file.write(history)
+                wait()
         # Clear results to reduce load on checkpointing
         print("Saving completed")
 

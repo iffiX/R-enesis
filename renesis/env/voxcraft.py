@@ -1,79 +1,119 @@
-import os.path
-
-import gym
+import copy
 import numpy as np
-from uuid import uuid4
+from time import time
 from gym.spaces import Box
+from ray.rllib import VectorEnv
+from ray.rllib.utils import override
 from renesis.sim import Voxcraft
 from renesis.utils.voxcraft import vxd_creator, get_voxel_positions
 from renesis.utils.fitness import max_z, table, distance_traveled, has_fallen
 from renesis.entities.growth_function import GrowthFunction
 
 
-class VoxcraftGrowthEnvironment(gym.Env):
+class VoxcraftGrowthEnvironment(VectorEnv):
 
     metadata = {"render.modes": ["ansi"]}
 
     def __init__(self, config):
-        print("Init")
-        self.genome = GrowthFunction(
-            materials=config["materials"],
-            max_dimension_size=config["max_dimension_size"],
-            max_view_size=config["max_view_size"],
-        )
+        self.genomes = [
+            GrowthFunction(
+                materials=config["materials"],
+                max_dimension_size=config["max_dimension_size"],
+                max_view_size=config["max_view_size"],
+                actuation_features=config["actuation_features"],
+            )
+            for _ in range(config["num_envs"])
+        ]
         self.amplitude_range = config["amplitude_range"]
         self.frequency_range = config["frequency_range"]
-        self.phase_shift_range = config["phase_shift_range"]
+        self.phase_offset_range = config["phase_offset_range"]
         self.max_steps = config["max_steps"]
-        self.spec = gym.envs.registration.EnvSpec("voxcraft")
-        self.spec.max_episode_steps = self.max_steps
         self.action_space = Box(
-            low=0, high=1, shape=[int(np.prod(self.genome.action_shape))]
+            low=0, high=1, shape=[int(np.prod(self.genomes[0].action_shape))]
         )
-        self.observation_space = Box(low=0, high=1, shape=self.genome.view_shape)
+        self.observation_space = Box(low=0, high=1, shape=self.genomes[0].view_shape)
         self.reward_range = (0, float("inf"))
-        self.base_template_path = config["base_template_path"]
+        with open(config["base_config_path"], "r") as file:
+            self.base_config = file.read()
         self.reward_type = config["reward_type"]
-        self.reward_interval = config["reward_interval"]
         self.voxel_size = config["voxel_size"]
         self.fallen_threshold = config["fallen_threshold"]
 
-        self.previous_reward = 0
-        self.robot = "\n"
-        self.robot_sim_history = ""
+        self.previous_rewards = [0 for _ in range(config["num_envs"])]
+        self.robots = ["\n" for _ in range(config["num_envs"])]
+        self.robot_sim_histories = ["" for _ in range(config["num_envs"])]
+        self.simulator = Voxcraft()
+        super().__init__(self.observation_space, self.action_space, config["num_envs"])
 
-    def reset(self, **kwargs):
-        self.genome.reset()
-        self.previous_reward = 0
-        return self.genome.get_local_view()
+    @override(VectorEnv)
+    def vector_reset(self):
+        for genome in self.genomes:
+            genome.reset()
 
-    def step(self, action):
-        print(f"Step: {self.genome.steps}")
-        self.genome.step(action.reshape(self.genome.action_shape))
-        reward_diff = 0
-        if self.genome.steps != 0 and self.genome.steps % self.reward_interval == 0:
-            reward = self.get_reward()
-            reward_diff = reward - self.previous_reward
-            self.previous_reward = reward
+        self.previous_rewards = [0 for _ in range(self.num_envs)]
+        self.robots = ["\n" for _ in range(self.num_envs)]
+        self.robot_sim_histories = ["" for _ in range(self.num_envs)]
+        return [genome.get_local_view() for genome in self.genomes]
 
-        done = not self.genome.building() or (self.genome.steps == self.max_steps)
-        return self.genome.get_local_view(), reward_diff, done, {}
+    @override(VectorEnv)
+    def reset_at(self, index=None):
+        if index is None:
+            index = 0
+        self.genomes[index].reset()
+        self.previous_rewards[index] = 0
+        self.robots[index] = "\n"
+        self.robot_sim_histories[index] = ""
+        return self.genomes[index].get_local_view()
 
-    def get_reward(self):
-        if self.genome.num_non_zero_voxel == 0:
-            # return directly since the simulator will throw an error
-            return 0
+    @override(VectorEnv)
+    def vector_step(self, actions):
+        all_finished = self.check_finished()
+        for genome, action, finished in zip(self.genomes, actions, all_finished):
+            # print(action.reshape(genome.action_shape))
+            if not finished:
+                genome.step(action.reshape(genome.action_shape))
 
-        out_path, sim_path = self.run_simulation()
-        initial_positions, final_positions = get_voxel_positions(
-            out_path, voxel_size=self.voxel_size
+        rewards = self.get_rewards(all_finished)
+        print(f"Rewards: {rewards}")
+        reward_diffs = [
+            reward - previous_reward
+            for reward, previous_reward in zip(rewards, self.previous_rewards)
+        ]
+        print(f"Reward diffs: {reward_diffs}")
+        self.previous_rewards = rewards
+        print(f"Finished: {self.check_finished()}")
+        return (
+            [genome.get_local_view() for genome in self.genomes],
+            reward_diffs,
+            self.check_finished(),
+            [{} for _ in range(self.num_envs)],
         )
-        reward = self.compute_reward_from_sim_result(initial_positions, final_positions)
-        subprocess.run(f"rm -fr {sim_path}".split())
-        print(f"Reward: {reward}")
-        return reward
 
-    def run_simulation(self):
+    def get_rewards(self, all_finished):
+        rewards = copy.deepcopy(self.previous_rewards)
+        valid_genomes = []
+        valid_genome_indices = []
+        for idx, (genome, finished) in enumerate(zip(self.genomes, all_finished)):
+            if genome.num_non_zero_voxel > 0 and not finished:
+                valid_genomes.append(genome)
+                valid_genome_indices.append(idx)
+
+        robots, (results, records) = self.run_simulations(valid_genomes)
+        for robot, result, record, idx in zip(
+            robots, results, records, valid_genome_indices
+        ):
+            initial_positions, final_positions = get_voxel_positions(
+                result, voxel_size=self.voxel_size
+            )
+            reward = self.compute_reward_from_sim_result(
+                initial_positions, final_positions
+            )
+            rewards[idx] = reward
+            self.robots[idx] = robot
+            self.robot_sim_histories[idx] = record
+        return rewards
+
+    def run_simulations(self, genomes):
         """
         Run a simulation using current representation.
 
@@ -81,38 +121,22 @@ class VoxcraftGrowthEnvironment(gym.Env):
             Path to the output.xml file.
             Path to the temporary directory (needs to be deleted).
         """
-        folder = uuid4()
-        sim_path = f"/tmp/{folder}"
-        out_path = f"{sim_path}/output.xml"
-        history_path = f"{sim_path}/run.history"
-        base_path = f"{sim_path}/base.vxa"
-        subprocess.run(f"mkdir -p {sim_path}".split())
-        subprocess.run(f"cp {self.base_template_path} {base_path}".split())
-        self.generate_sim_data(sim_path)
-        run_command = f"./voxcraft-sim -f -i {sim_path} -o {out_path}"
-        with open(history_path, "w") as file:
-            if (
-                subprocess.run(
-                    run_command.split(),
-                    cwd=os.path.dirname(voxcraft_bin_path),
-                    stdout=file,
-                ).returncode
-                != 0
-            ):
-                raise ValueError("Exception occurred in simulation")
-        with open(history_path, "r") as file:
-            self.robot_sim_history = file.read()
-        return out_path, sim_path
+        robots = []
+        for genome in genomes:
+            sizes, representation = genome.get_representation(
+                self.amplitude_range, self.frequency_range, self.phase_offset_range
+            )
 
-    def generate_sim_data(self, data_dir_path):
-        sizes, representation = self.genome.get_representation(
-            self.amplitude_range, self.frequency_range, self.phase_shift_range
+            robots.append(vxd_creator(sizes, representation, record_history=True))
+        begin = time()
+        out = self.simulator.run_sims([self.base_config] * len(robots), robots)
+        end = time()
+        print(
+            f"{self.num_envs} simulations total {end - begin:.3f}s, "
+            f"average {(end - begin) / self.num_envs:.3f}s"
         )
-        robot_path = data_dir_path + "/robot.vxd"
-        self.robot = vxd_creator(
-            sizes, representation, robot_path, record_history=False
-        )
-        # print(self.robot)
+        # print(out[1][0])
+        return robots, out
 
     def compute_reward_from_sim_result(self, initial_positions, final_positions):
         if self.reward_type == "max_z":
@@ -131,9 +155,17 @@ class VoxcraftGrowthEnvironment(gym.Env):
                 reward = 0
         else:
             raise Exception("Unknown reward type: {self.reward_type}")
-        print(reward)
+        # print(reward)
+        if np.isnan(reward):
+            reward = 0
         return reward
+
+    def check_finished(self):
+        return [
+            not genome.building() or (genome.steps == self.max_steps)
+            for genome in self.genomes
+        ]
 
     def render(self, mode="ansi"):
         if mode == "ansi":
-            return self.robot + "\n"
+            return self.robot[0] + "\n"
