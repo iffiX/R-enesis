@@ -10,7 +10,7 @@ from renesis.utils.fitness import (
     max_hull_volume_min_density,
 )
 from renesis.utils.plotting import plot_voxels
-from renesis.entities.growth_function import GrowthFunction
+from renesis.env_model.growth import Growth
 
 
 """A 3D grid environment in which creatures iteratively grow."""
@@ -21,7 +21,7 @@ class SimpleGridGrowthEnvironment(gym.Env):
     metadata = {"render.modes": ["rgb_array"]}
 
     def __init__(self, config):
-        self.genome = GrowthFunction(
+        self.genome = Growth(
             materials=config["materials"],
             max_dimension_size=config["max_dimension_size"],
             max_view_size=config["max_view_size"],

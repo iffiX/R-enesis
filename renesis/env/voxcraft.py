@@ -1,37 +1,27 @@
 import copy
 import numpy as np
 from time import time
-from gym.spaces import Box
+from typing import List, Dict, Any, Optional
 from ray.rllib import VectorEnv
 from ray.rllib.utils import override
 from renesis.sim import Voxcraft
+from renesis.utils.debug import enable_debugger
 from renesis.utils.voxcraft import vxd_creator, get_voxel_positions
 from renesis.utils.fitness import max_z, table, distance_traveled, has_fallen
-from renesis.entities.growth_function import GrowthFunction
+from renesis.env_model.base import BaseModel
+from renesis.env_model.cppn import CPPNModel
+from renesis.env_model.growth import GrowthModel
 
 
-class VoxcraftGrowthEnvironment(VectorEnv):
+class VoxcraftBaseEnvironment(VectorEnv):
 
     metadata = {"render.modes": ["ansi"]}
 
-    def __init__(self, config):
-        self.genomes = [
-            GrowthFunction(
-                materials=config["materials"],
-                max_dimension_size=config["max_dimension_size"],
-                max_view_size=config["max_view_size"],
-                actuation_features=config["actuation_features"],
-            )
-            for _ in range(config["num_envs"])
-        ]
-        self.amplitude_range = config["amplitude_range"]
-        self.frequency_range = config["frequency_range"]
-        self.phase_offset_range = config["phase_offset_range"]
+    def __init__(self, config: Dict[str, Any], env_models: List[BaseModel]):
+        self.env_models = env_models
         self.max_steps = config["max_steps"]
-        self.action_space = Box(
-            low=0, high=1, shape=[int(np.prod(self.genomes[0].action_shape))]
-        )
-        self.observation_space = Box(low=0, high=1, shape=self.genomes[0].view_shape)
+        self.action_space = env_models[0].action_space
+        self.observation_space = env_models[0].observation_space
         self.reward_range = (0, float("inf"))
         with open(config["base_config_path"], "r") as file:
             self.base_config = file.read()
@@ -42,39 +32,60 @@ class VoxcraftGrowthEnvironment(VectorEnv):
         self.previous_rewards = [0 for _ in range(config["num_envs"])]
         self.robots = ["\n" for _ in range(config["num_envs"])]
         self.robot_sim_histories = ["" for _ in range(config["num_envs"])]
+        self.state_data = [None for _ in range(config["num_envs"])]
+
+        self.best_reward = -np.inf
+        self.best_finished_robot = "\n"
+        self.best_finished_robot_sim_history = ""
+        self.best_finished_robot_state_data = None
+
         self.simulator = Voxcraft()
         super().__init__(self.observation_space, self.action_space, config["num_envs"])
 
     @override(VectorEnv)
+    def reset_at(self, index: Optional[int] = None):
+        if index is None:
+            index = 0
+        self.env_models[index].reset()
+        self.previous_rewards[index] = 0
+        self.robots[index] = "\n"
+        self.robot_sim_histories[index] = ""
+        self.state_data[index] = None
+        return self.env_models[index].observe()
+
+    @override(VectorEnv)
+    def restart_at(self, index: Optional[int] = None):
+        self.reset_at(index)
+
+    @override(VectorEnv)
     def vector_reset(self):
-        for genome in self.genomes:
-            genome.reset()
+        for model in self.env_models:
+            model.reset()
 
         self.previous_rewards = [0 for _ in range(self.num_envs)]
         self.robots = ["\n" for _ in range(self.num_envs)]
         self.robot_sim_histories = ["" for _ in range(self.num_envs)]
-        return [genome.get_local_view() for genome in self.genomes]
-
-    @override(VectorEnv)
-    def reset_at(self, index=None):
-        if index is None:
-            index = 0
-        self.genomes[index].reset()
-        self.previous_rewards[index] = 0
-        self.robots[index] = "\n"
-        self.robot_sim_histories[index] = ""
-        return self.genomes[index].get_local_view()
+        self.state_data = [None for _ in range(self.num_envs)]
+        return [model.observe() for model in self.env_models]
 
     @override(VectorEnv)
     def vector_step(self, actions):
         all_finished = self.check_finished()
-        for genome, action, finished in zip(self.genomes, actions, all_finished):
-            # print(action.reshape(genome.action_shape))
+        for model, action, finished in zip(self.env_models, actions, all_finished):
             if not finished:
-                genome.step(action.reshape(genome.action_shape))
+                model.step(action)
 
         rewards = self.get_rewards(all_finished)
         print(f"Rewards: {rewards}")
+
+        for i, finish in enumerate(self.check_finished()):
+            if finish:
+                if rewards[i] > self.best_reward:
+                    self.best_reward = rewards[i]
+                    self.best_finished_robot = self.robots[i]
+                    self.best_finished_robot_sim_history = self.robot_sim_histories[i]
+                    self.best_finished_robot_state_data = self.state_data[i]
+
         reward_diffs = [
             reward - previous_reward
             for reward, previous_reward in zip(rewards, self.previous_rewards)
@@ -83,7 +94,7 @@ class VoxcraftGrowthEnvironment(VectorEnv):
         self.previous_rewards = rewards
         print(f"Finished: {self.check_finished()}")
         return (
-            [genome.get_local_view() for genome in self.genomes],
+            [model.observe() for model in self.env_models],
             reward_diffs,
             self.check_finished(),
             [{} for _ in range(self.num_envs)],
@@ -91,16 +102,16 @@ class VoxcraftGrowthEnvironment(VectorEnv):
 
     def get_rewards(self, all_finished):
         rewards = copy.deepcopy(self.previous_rewards)
-        valid_genomes = []
-        valid_genome_indices = []
-        for idx, (genome, finished) in enumerate(zip(self.genomes, all_finished)):
-            if genome.num_non_zero_voxel > 0 and not finished:
-                valid_genomes.append(genome)
-                valid_genome_indices.append(idx)
+        valid_models = []
+        valid_model_indices = []
+        for idx, (model, finished) in enumerate(zip(self.env_models, all_finished)):
+            if not model.is_robot_empty() and not finished:
+                valid_models.append(model)
+                valid_model_indices.append(idx)
 
-        robots, (results, records) = self.run_simulations(valid_genomes)
-        for robot, result, record, idx in zip(
-            robots, results, records, valid_genome_indices
+        robots, (results, records) = self.run_simulations(valid_models)
+        for robot, result, record, model, idx in zip(
+            robots, results, records, valid_models, valid_model_indices
         ):
             initial_positions, final_positions = get_voxel_positions(
                 result, voxel_size=self.voxel_size
@@ -111,9 +122,10 @@ class VoxcraftGrowthEnvironment(VectorEnv):
             rewards[idx] = reward
             self.robots[idx] = robot
             self.robot_sim_histories[idx] = record
+            self.state_data[idx] = model.get_state_data()
         return rewards
 
-    def run_simulations(self, genomes):
+    def run_simulations(self, env_models):
         """
         Run a simulation using current representation.
 
@@ -122,11 +134,8 @@ class VoxcraftGrowthEnvironment(VectorEnv):
             Path to the temporary directory (needs to be deleted).
         """
         robots = []
-        for genome in genomes:
-            sizes, representation = genome.get_representation(
-                self.amplitude_range, self.frequency_range, self.phase_offset_range
-            )
-
+        for model in env_models:
+            sizes, representation = model.get_robot()
             robots.append(vxd_creator(sizes, representation, record_history=True))
         begin = time()
         out = self.simulator.run_sims([self.base_config] * len(robots), robots)
@@ -135,7 +144,6 @@ class VoxcraftGrowthEnvironment(VectorEnv):
             f"{self.num_envs} simulations total {end - begin:.3f}s, "
             f"average {(end - begin) / self.num_envs:.3f}s"
         )
-        # print(out[1][0])
         return robots, out
 
     def compute_reward_from_sim_result(self, initial_positions, final_positions):
@@ -155,17 +163,65 @@ class VoxcraftGrowthEnvironment(VectorEnv):
                 reward = 0
         else:
             raise Exception("Unknown reward type: {self.reward_type}")
-        # print(reward)
         if np.isnan(reward):
             reward = 0
         return reward
 
     def check_finished(self):
         return [
-            not genome.building() or (genome.steps == self.max_steps)
-            for genome in self.genomes
+            model.is_finished() or (model.steps == self.max_steps)
+            for model in self.env_models
         ]
 
     def render(self, mode="ansi"):
         if mode == "ansi":
             return self.robot[0] + "\n"
+
+
+class VoxcraftGrowthEnvironment(VoxcraftBaseEnvironment):
+
+    metadata = {"render.modes": ["ansi"]}
+
+    def __init__(self, config):
+        if config["debug"]:
+            enable_debugger(config["debug_ip"], config["debug_port"])
+        env_models = [
+            GrowthModel(
+                materials=config["materials"],
+                max_dimension_size=config["max_dimension_size"],
+                max_view_size=config["max_view_size"],
+                actuation_features=config["actuation_features"],
+                amplitude_range=config["amplitude_range"],
+                frequency_range=config["frequency_range"],
+                phase_offset_range=config["phase_offset_range"],
+            )
+            for _ in range(config["num_envs"])
+        ]
+        super().__init__(config, env_models)
+
+
+class VoxcraftCPPNEnvironment(VoxcraftBaseEnvironment):
+
+    metadata = {"render.modes": ["ansi"]}
+
+    def __init__(self, config):
+        if config["debug"]:
+            enable_debugger(config["debug_ip"], config["debug_port"])
+        env_models = [
+            CPPNModel(
+                materials=config["materials"],
+                dimension_size=config["dimension_size"],
+                actuation_features=config["actuation_features"],
+                amplitude_range=config["amplitude_range"],
+                frequency_range=config["frequency_range"],
+                phase_offset_range=config["phase_offset_range"],
+            )
+            for _ in range(config["num_envs"])
+        ]
+        super().__init__(config, env_models)
+
+    def get_rewards(self, all_finished):
+        base_rewards = super().get_rewards(all_finished)
+        for idx, model in enumerate(self.env_models):
+            base_rewards[idx] += model.get_cppn_reward()
+        return base_rewards

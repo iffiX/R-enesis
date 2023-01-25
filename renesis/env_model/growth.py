@@ -1,17 +1,18 @@
 import numpy as np
 from typing import Tuple
 from collections import deque
-import sys
-
-np.set_printoptions(precision=4, threshold=sys.maxsize)
+from gym.spaces import Box
+from .base import BaseModel
 
 
 def sigmoid(x: np.ndarray):
     return 1 / (1 + np.exp(-x))
 
 
-class GrowthFunction:
-    """Generate patterns given patterns.
+class GrowthModel(BaseModel):
+    """
+    The growth model. A couple of voxels is chosen to be added in
+    each action.
 
     Use the local context to decide what pattern to generate next.
     IE the the configuration of voxels added depend on the proportion
@@ -25,7 +26,11 @@ class GrowthFunction:
         max_dimension_size=50,
         max_view_size=21,
         actuation_features=("amplitude", "frequency", "phase_offset"),
+        amplitude_range=(0, 1),
+        frequency_range=(0, 1),
+        phase_offset_range=(-1, 1),
     ):
+        super().__init__()
         if max_dimension_size < 5:
             raise ValueError(
                 f"Max dimension size is too small, got {max_dimension_size}, "
@@ -38,10 +43,14 @@ class GrowthFunction:
         for a in actuation_features:
             assert a in ("amplitude", "frequency", "phase_offset")
         assert len(actuation_features) > 0
+
         self.materials = materials
         self.max_dimension_size = max_dimension_size
         self.max_view_size = max_view_size
         self.actuation_features = actuation_features
+        self.amplitude_range = amplitude_range
+        self.frequency_range = frequency_range
+        self.phase_offset_range = phase_offset_range
 
         self.radius = self.max_view_size // 2
         self.actual_dimension_size = max_dimension_size + self.radius * 2
@@ -52,18 +61,21 @@ class GrowthFunction:
         self.occupied_values = []
         self.num_non_zero_voxel = 0
         self.num_voxels = 0
-        self.steps = 0
         self.body = None
 
+        self.action_shape = (6, len(self.materials), 1 + len(self.actuation_features))
+        self.view_shape = (self.max_view_size,) * 3 + (
+            1 + len(self.actuation_features),
+        )
         self.reset()
 
     @property
-    def action_shape(self):
-        return 6, len(self.materials), 1 + len(self.actuation_features)
+    def action_space(self):
+        return Box(low=0, high=1, shape=np.prod(self.action_shape))
 
     @property
-    def view_shape(self):
-        return (self.max_view_size,) * 3 + (1 + len(self.actuation_features),)
+    def observation_space(self):
+        return Box(low=0, high=1, shape=self.view_shape)
 
     def reset(self):
         self.voxels = np.zeros(
@@ -83,20 +95,20 @@ class GrowthFunction:
         # to 1 to prevent generating non-attaching voxels.
         self.body.appendleft(self.center_voxel_pos)
 
-    def building(self):
-        """Returns True if there is more to build."""
+    def is_finished(self):
+        return len(self.body) == 0
 
-        return len(self.body) > 0
+    def is_robot_empty(self):
+        return self.num_non_zero_voxel == 0
 
-    def step(self, configuration: np.ndarray):
-        """Add one configuration."""
-        configuration = sigmoid(configuration)
+    def step(self, action: np.ndarray):
+        configuration = sigmoid(action.reshape(self.action_shape))
         configuration = self.mask_configuration(configuration)
         voxel = self.body.pop()
         self.attach_voxels(configuration, voxel)
         self.steps += 1
 
-    def get_local_view(self):
+    def observe(self):
         """
         Get local view using the first voxel in queue as the center.
         Returns:
@@ -116,20 +128,7 @@ class GrowthFunction:
         out[:, :, :, 0] /= max(self.materials)
         return out
 
-    def get_representation(
-        self, amplitude_range=None, frequency_range=None, phase_offset_range=None
-    ):
-        """
-        Returns:
-            A tuple of size containing (x, y, z)
-            A list of tuples of length z (voxel max height), each tuple is of form
-            (material, amplitude, frequency, phase shift), and each element in tuple
-            is a list of length x*y, where x and y are the bounding box sizes
-            of all voxels.
-        """
-        amplitude_range = amplitude_range or (0, 1)
-        frequency_range = frequency_range or (0, 1)
-        phase_offset_range = phase_offset_range or (-1, 1)
+    def get_robot(self):
         x_occupied = [
             x for x in range(self.occupied.shape[0]) if np.any(self.occupied[x])
         ]
@@ -160,7 +159,7 @@ class GrowthFunction:
                         z,
                         1 + self.actuation_features.index("amplitude"),
                     ],
-                    amplitude_range,
+                    self.amplitude_range,
                 )
                 .flatten(order="F")
                 .tolist()
@@ -173,7 +172,7 @@ class GrowthFunction:
                         z,
                         1 + self.actuation_features.index("frequency"),
                     ],
-                    frequency_range,
+                    self.frequency_range,
                 )
                 .flatten(order="F")
                 .tolist()
@@ -186,7 +185,7 @@ class GrowthFunction:
                         z,
                         1 + self.actuation_features.index("phase_offset"),
                     ],
-                    phase_offset_range,
+                    self.phase_offset_range,
                 )
                 .flatten(order="F")
                 .tolist()
@@ -214,7 +213,7 @@ class GrowthFunction:
 
     def get_valid_position_indices(self):
         """
-        Returns: A list of position indicies from 0 to 5.
+        Returns: A list of position indices from 0 to 5.
         """
         voxel = self.body[-1]
         valid_position_indices = []
