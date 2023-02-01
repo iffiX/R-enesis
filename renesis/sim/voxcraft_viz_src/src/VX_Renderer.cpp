@@ -63,6 +63,7 @@ void VX_HistoryRenderer::Render(ViewMode mode) {
     string line;
     while (getline(historyStream, line)) {
         ClearScreen();
+        // UpdateLighting();
         RenderFloor(voxelSize * 2);
         if(RenderHistoryFrame(line, mode)){
 #ifndef USE_SOFTWARE_GL
@@ -70,6 +71,7 @@ void VX_HistoryRenderer::Render(ViewMode mode) {
 #endif
             SaveFrame();
         }
+        line.clear();
     }
 }
 
@@ -82,7 +84,7 @@ py::array VX_HistoryRenderer::GetFrames() const {
         for (size_t f = 0; f < frames.size(); f++) {
             memcpy(array + framePixelNum * f, frames[f].get(), framePixelNum * sizeof(uint8_t));
         }
-        auto capsule = py::capsule(array, [](void *v) { free(v); });
+        auto capsule = py::capsule(array, [](void *v) { delete [] (uint8_t*)v; std::cout << "Array Freed" << std::endl;});
         return std::move(py::array(
                 {frames.size(), (size_t) height, (size_t) width, (size_t) 4},
                 {size_t(height * width * 4 * sizeof(uint8_t)),
@@ -136,12 +138,89 @@ void VX_HistoryRenderer::InitGL() {
     glMatrixMode(GL_PROJECTION);
     glLoadIdentity();
     gluPerspective(60.0, float(width) / float(height), 0.01, 100);
+
+    // Turn on backface culling
+    glFrontFace(GL_CCW);
+    glCullFace(GL_BACK);
+
+    // Turn on depth testing
+    glEnable(GL_DEPTH_TEST);
+    glDepthFunc(GL_LEQUAL);
+
+    // Enable opacity
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    glHint(GL_POLYGON_SMOOTH_HINT, GL_NICEST);
+    //		glHint(GL_LINE_SMOOTH_HINT, GL_NICEST);
+    //		glEnable(GL_LINE_SMOOTH);
+    glDisable(GL_LINE_SMOOTH);
+    glDisable(GL_POLYGON_SMOOTH);
+    glEnable(GL_NORMALIZE);
+    glPolygonOffset(1.0, 2);
+    glEnable(GL_POLYGON_OFFSET_FILL);
+}
+
+void VX_HistoryRenderer::UpdateLighting() {
+    glShadeModel(GL_SMOOTH); // smooth surfaces
+    glEnable(GL_LIGHTING);   // global lighting
+
+    float AmbientLight[] = {0.9f, 0.9f, 0.9f, 1.0f};
+    glLightfv(GL_LIGHT0, GL_AMBIENT, AmbientLight); // Doesn't do anything unless we have at least one light!
+
+    float d[4], s[4], p[4];
+    glEnable(GL_LIGHT0);
+    d[0] = 0.35, d[1] = 0.35, d[2] = 0.35, d[3] = 1;
+    s[0] = 0.16, s[1] = 0.16, s[2] = 0.16, s[3] = 1;
+    p[0] = -0.5f * 100 + historyCoM.x;
+    p[1] = 0.5f * 100 + historyCoM.y;
+    p[2] = 2.0f * 100 + historyCoM.z;
+    p[3] = 1;
+    glLightfv(GL_LIGHT0, GL_DIFFUSE, d);
+    glLightfv(GL_LIGHT0, GL_SPECULAR, s);
+    glLightfv(GL_LIGHT0, GL_POSITION, p);
+
+    glEnable(GL_LIGHT1);
+    d[0] = 0.235, d[1] = 0.235, d[2] = 0.235, d[3] = 1;
+    s[0] = 0.08, s[1] = 0.08, s[2] = 0.08, s[3] = 1;
+    p[0] = 2.0f * 100 + historyCoM.x;
+    p[1] = -0.5f * 100 + historyCoM.y;
+    p[2] = 1.0f * 100 + historyCoM.z;
+    p[3] = 1;
+    glLightfv(GL_LIGHT1, GL_DIFFUSE, d);
+    glLightfv(GL_LIGHT1, GL_SPECULAR, s);
+    glLightfv(GL_LIGHT1, GL_POSITION, p);
+
+    glEnable(GL_LIGHT2);
+    d[0] = 0.35, d[1] = 0.35, d[2] = 0.35, d[3] = 1;
+    s[0] = 0.08, s[1] = 0.08, s[2] = 0.08, s[3] = 1;
+    p[0] = 1.0f * 100 + historyCoM.x;
+    p[1] = -1.0f * 100 + historyCoM.y;
+    p[2] = -1.0f * 100 + historyCoM.z;
+    p[3] = 1;
+    glLightfv(GL_LIGHT2, GL_DIFFUSE, d);
+    glLightfv(GL_LIGHT2, GL_SPECULAR, s);
+    glLightfv(GL_LIGHT2, GL_POSITION, p);
+
+    // Global scene lighing setup
+    glPolygonMode(GL_FRONT_AND_BACK, GL_FILL); // default, but verify
+
+    GLfloat mat_specular[] = {1.0f, 1.0f, 1.0f, 1.0f}; // Specular (highlight)
+    GLfloat mat_shininess[] = {70};                    // Shininess (size of highlight)
+    glMaterialfv(GL_FRONT_AND_BACK, GL_SPECULAR, mat_specular);
+    glMaterialfv(GL_FRONT_AND_BACK, GL_SHININESS, mat_shininess);
+
+    glColorMaterial(GL_FRONT_AND_BACK, GL_AMBIENT_AND_DIFFUSE); // Use ambient and diffuse
+    glEnable(GL_COLOR_MATERIAL);                                // enable color tracking
+
+    glLightModeli(GL_LIGHT_MODEL_TWO_SIDE, GL_TRUE); // for accurate light reflections, mu
 }
 
 void VX_HistoryRenderer::ClearScreen() {
     // Set the current clear color to deep grey
     glClearColor(0.3, 0.3, 0.3, 1);
-    glClear(GL_COLOR_BUFFER_BIT);
+
+    // Clear color buffer and depth buffer to prepare for next rendering
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 }
 
 void VX_HistoryRenderer::ParseSettings() {
@@ -174,9 +253,7 @@ void VX_HistoryRenderer::ParseSettings() {
             if (op_voxel_size) {
                 voxelSize = tree.get("voxel_size", 0.01);
             }
-        } else if (line.find("<<<") != string::npos) {
-            // Put line back
-            historyStream << line << endl;
+        } else {
             break;
         }
     }
@@ -351,7 +428,7 @@ bool VX_HistoryRenderer::RenderHistoryFrame(const string &recordLine, ViewMode m
                         c = defaultColor;
                     }
                 }
-                CGL_Utils::DrawCube(nnn, ppp, true, true, 1.0, c, false);
+                CGL_Utils::DrawCube(nnn, ppp, true, true, 0.0, c, false);
             }
             glPopMatrix();
 

@@ -1,0 +1,15 @@
+#!/bin/bash
+
+#sudo apt update
+#sudo apt install -y python3-venv libpython3-dev graphviz ninja-build default-jre
+#python3 -m venv venv
+
+#conda install -c conda-forge gxx gcc libgcc-ng sysroot_linux-64 cmake elfutils libunwind
+#conda update libgcc-ng
+#conda install -c anaconda graphviz hdf5
+
+conda install cuda -c nvidia/label/cuda-11.8.0
+conda install -c conda-forge graphviz python=3.9.0 gcc=9.4.0 gxx=9.4.0 boost
+python -m venv venv
+venv/bin/pip install torch==1.11.0+cu113 -f https://download.pytorch.org/whl/torch_stable.html
+venv/bin/pip install -r requirements.txt

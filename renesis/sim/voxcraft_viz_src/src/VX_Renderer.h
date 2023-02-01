@@ -54,11 +54,15 @@ public:
 private:
     void InitGL();
 
+
+
     void ClearScreen();
 
     void ParseSettings();
 
     bool RenderHistoryFrame(const std::string& recordLine, ViewMode mode = HISTORY);
+
+    void UpdateLighting();
 
     static void RenderFloor(vfloat hexTileEdgeLength);
 
