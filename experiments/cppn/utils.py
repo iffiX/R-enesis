@@ -2,6 +2,7 @@ import os
 import graphviz
 import gym.spaces
 import numpy as np
+import ray
 import torch as t
 from torch import nn
 from typing import List, Dict
@@ -512,32 +513,16 @@ class CustomCallbacks(DefaultCallbacks):
         data = result["episode_media"].get("episode_data", [])
         episode_data = data[-num_episodes:]
 
+        # Only preserve 1 result to reduce load on checkpointing
+        result["episode_media"] = {
+            "episode_data": episode_data[-1] if len(episode_data) > 0 else []
+        }
+
         if "evaluation" in result:
-            data = result["evaluation"]["episode_media"].get("episode_data", [])
-            episode_data += data[-num_episodes:]
-
-        # Summary writer requires video to be in (N, T, C, H, W) shape
-
-        # See https://tensorboardx.readthedocs.io/en/latest/tensorboard.html?
-        # highlight=add_video#tensorboardX.SummaryWriter.add_video
-
-        # See https://github.com/ray-project/ray/blob/
-        # 0452a3a435e023eada85f670e70ffef02ceb5943/python/ray/tune/logger.py#L212
-
-        # Disabled due to OOM issues
-        # T H W C to T C H W, then add batch dimension
-        # if len(data) > 0:
-        #     # Only render the last episode
-        #     history = episode_data[-1]["robot_sim_history"]
-        #     frames = render(history)
-        #     if frames is not None:
-        #         result["custom_metrics"].update(
-        #             {
-        #                 "video": np.expand_dims(
-        #                     np.transpose(frames, (0, 3, 1, 2),), axis=0,
-        #                 )
-        #             }
-        #         )
+            result["evaluation"]["episode_media"] = {}
+        if "sampler_results" in result:
+            result["sampler_results"]["episode_media"] = {}
+        print("Cleaning completed")
 
 
 class DataLoggerCallback(LoggerCallback):
@@ -552,35 +537,26 @@ class DataLoggerCallback(LoggerCallback):
 
     def log_trial_result(self, iteration, trial, result):
         step = result.get(TIMESTEPS_TOTAL) or result[TRAINING_ITERATION]
-        num_episodes = result["episodes_this_iter"]
-
         data = result["episode_media"].get("episode_data", [])
-        episode_data = data[-num_episodes:]
+        result["episode_media"] = {}
+        if data and data["cppn_graphs"] is not None:
+            print(f"Saving cppn graph")
+            unpruned_graph, pruned_graph = data["cppn_graphs"]
+            g1 = graphviz.Source(unpruned_graph)
+            g1.render(
+                filename=f"unpruned_{step:08d}",
+                directory=self._trial_local_dir[trial],
+                format="png",
+            )
+            g2 = graphviz.Source(pruned_graph)
+            g2.render(
+                filename=f"pruned_{step:08d}",
+                directory=self._trial_local_dir[trial],
+                format="png",
+            )
 
-        if "evaluation" in result:
-            data = result["evaluation"]["episode_media"].get("episode_data", [])
-            episode_data += data[-num_episodes:]
-
-        if len(episode_data) > 0:
-            if episode_data[-1]["cppn_graphs"] is not None:
-                print(f"Saving cppn graph")
-                unpruned_graph, pruned_graph = episode_data[-1]["cppn_graphs"]
-                g1 = graphviz.Source(unpruned_graph)
-                g1.render(
-                    filename=f"unpruned_{step:08d}",
-                    directory=self._trial_local_dir[trial],
-                    format="png",
-                )
-                g2 = graphviz.Source(pruned_graph)
-                g2.render(
-                    filename=f"pruned_{step:08d}",
-                    directory=self._trial_local_dir[trial],
-                    format="png",
-                )
-
-            # Save a video only for the last episode in the list
-            robot = episode_data[-1]["robot"]
-            history = episode_data[-1]["robot_sim_history"]
+            robot = data["robot"]
+            history = data["robot_sim_history"]
             frames = render(history)
 
             if frames is not None:
@@ -607,28 +583,8 @@ class DataLoggerCallback(LoggerCallback):
                     print(f"Saving history to {path}")
                     file.write(history)
                 wait()
-        # Clear results to reduce load on checkpointing
+
         print("Saving completed")
-
-
-class CleaningCallback1(Callback):
-    def on_trial_result(self, iteration: int, trials, trial, result, **info):
-        result["episode_media"] = {}
-        if "evaluation" in result:
-            result["evaluation"]["episode_media"] = {}
-        if "sampler_results" in result:
-            result["sampler_results"]["episode_media"] = {}
-        print("Cleaning 1 completed")
-
-
-class CleaningCallback2(Callback):
-    def on_trial_result(self, iteration: int, trials, trial, result, **info):
-        result["custom_metrics"] = {}
-        if "evaluation" in result:
-            result["evaluation"]["custom_metrics"] = {}
-        if "sampler_results" in result:
-            result["sampler_results"]["custom_metrics"] = {}
-        print("Cleaning 2 completed")
 
 
 ModelCatalog.register_custom_model("actor_model", Actor)

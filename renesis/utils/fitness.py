@@ -103,6 +103,7 @@ def get_stability(x, max_z):
 
 
 def has_fallen(initial_positions, final_positions, threshold=0.25):
+    # ! Incorrect
     X = np.array(initial_positions)[:, :2]
     Y = np.array(final_positions)[:, :2]
     difference = np.abs(X - Y)
@@ -112,7 +113,7 @@ def has_fallen(initial_positions, final_positions, threshold=0.25):
 def distance_traveled(initial_positions, final_positions):
     X = np.array(initial_positions)[:, :2]
     Y = np.array(final_positions)[:, :2]
-    return np.linalg.norm(X - Y).max()
+    return np.linalg.norm(X - Y, axis=1).max()
 
 
 def max_volume(X):

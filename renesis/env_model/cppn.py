@@ -557,7 +557,8 @@ class CPPNModel(BaseModel):
                 action[4],
             )
             self.update_voxels()
-            self.finished = bool(action[5])
+            if self.steps >= 10:
+                self.finished = bool(action[5])
             self.steps += 1
 
     def observe(self):

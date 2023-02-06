@@ -19,7 +19,7 @@
 	    <Damping>
             <BondDampingZ>1</BondDampingZ>
             <ColDampingZ>0.8</ColDampingZ>
-            <SlowDampingZ>0.01</SlowDampingZ>
+            <SlowDampingZ>0.03</SlowDampingZ>
         </Damping>
 	</Simulator>
 	<Environment>
@@ -51,10 +51,10 @@
             </Display>
             <Mechanical>
                 <MatModel>0</MatModel><!--0 = no failing-->
-                <Elastic_Mod>500</Elastic_Mod>
+                <Elastic_Mod>1e5</Elastic_Mod>
                 <Fail_Stress>0</Fail_Stress>
-                <Density>10</Density>
-                <Poissons_Ratio>0</Poissons_Ratio>
+                <Density>1500</Density>
+                <Poissons_Ratio>0.35</Poissons_Ratio>
                 <CTE>0.01</CTE>
                 <MaterialTempPhase>0</MaterialTempPhase>
                 <uStatic>1</uStatic>
@@ -71,10 +71,10 @@
             </Display>
             <Mechanical>
                 <MatModel>0</MatModel><!--0 = no failing-->
-                <Elastic_Mod>500</Elastic_Mod>
+                <Elastic_Mod>1e5</Elastic_Mod>
                 <Fail_Stress>0</Fail_Stress>
-                <Density>10</Density>
-                <Poissons_Ratio>0</Poissons_Ratio>
+                <Density>1500</Density>
+                <Poissons_Ratio>0.35</Poissons_Ratio>
                 <CTE>0.01</CTE>
                 <MaterialTempPhase>0.5</MaterialTempPhase>
                 <uStatic>1</uStatic>
@@ -91,10 +91,10 @@
             </Display>
             <Mechanical>
                 <MatModel>0</MatModel><!--0 = no failing-->
-                <Elastic_Mod>500</Elastic_Mod>
+                <Elastic_Mod>1e5</Elastic_Mod>
                 <Fail_Stress>0</Fail_Stress>
-                <Density>10</Density>
-                <Poissons_Ratio>0</Poissons_Ratio>
+                <Density>1500</Density>
+                <Poissons_Ratio>0.35</Poissons_Ratio>
                 <CTE>0</CTE>
                 <MaterialTempPhase>0</MaterialTempPhase>
                 <uStatic>1</uStatic>
@@ -111,10 +111,10 @@
             </Display>
             <Mechanical>
                 <MatModel>0</MatModel><!--0 = no failing-->
-                <Elastic_Mod>10</Elastic_Mod>
+                <Elastic_Mod>1e5</Elastic_Mod>
                 <Fail_Stress>0</Fail_Stress>
-                <Density>10</Density>
-                <Poissons_Ratio>0</Poissons_Ratio>
+                <Density>1500</Density>
+                <Poissons_Ratio>0.35</Poissons_Ratio>
                 <CTE>0</CTE>
                 <MaterialTempPhase>0</MaterialTempPhase>
                 <uStatic>1</uStatic>

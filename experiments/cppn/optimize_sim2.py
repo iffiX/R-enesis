@@ -7,12 +7,7 @@ from ray.tune.logger import TBXLoggerCallback
 from ray.rllib.agents.ppo import PPOTrainer
 from renesis.env_model.cppn import CPPNModel
 from renesis.env.voxcraft import VoxcraftCPPNEnvironment
-from experiments.cppn.utils import (
-    CustomCallbacks,
-    DataLoggerCallback,
-    CleaningCallback1,
-    CleaningCallback2,
-)
+from experiments.cppn.utils import CustomCallbacks, DataLoggerCallback
 
 from renesis.utils.debug import enable_debugger
 
@@ -34,7 +29,7 @@ config = {
         "amplitude_range": (0.5, 2),
         "frequency_range": (0.5, 4),
         "phase_offset_range": (0, 1),
-        "max_steps": 50,
+        "max_steps": 20,
         "reward_type": "distance_traveled",
         "base_config_path": str(
             os.path.join(
@@ -46,8 +41,8 @@ config = {
         "num_envs": 32,
     },
     "sgd_minibatch_size": 128,
-    "train_batch_size": 3200,
-    "rollout_fragment_length": 50,
+    "train_batch_size": 640,
+    "rollout_fragment_length": 20,
     "vf_clip_param": 10 ** 5,
     "seed": np.random.randint(10 ** 5),
     "num_workers": 1,
@@ -127,13 +122,7 @@ if __name__ == "__main__":
         checkpoint_freq=1,
         keep_checkpoints_num=2,
         stop={"timesteps_total": 100000, "episodes_total": 10000},
-        # Order is important! We want to log videos but not letting
-        # loggers automatically added by ray.tune to see it
-        callbacks=[
-            DataLoggerCallback(),
-            CleaningCallback1(),
-            TBXLoggerCallback(),
-            CleaningCallback2(),
-        ]
+        # Order is important!
+        callbacks=[DataLoggerCallback(), TBXLoggerCallback()]
         # restore=,
     )

@@ -77,4 +77,6 @@ def get_voxel_positions(result, voxel_size=0.01):
 
     initial_positions = doc.xpath("/report/detail/voxel_initial_positions")[0].text
     final_positions = doc.xpath("/report/detail/voxel_final_positions")[0].text
-    return parse(initial_positions), parse(final_positions)
+    initial_positions = parse(initial_positions)
+    final_positions = parse(final_positions)
+    return initial_positions, final_positions

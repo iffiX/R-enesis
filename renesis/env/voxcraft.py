@@ -1,3 +1,4 @@
+import os
 import copy
 import numpy as np
 from time import time
@@ -8,6 +9,7 @@ from renesis.sim import Voxcraft
 from renesis.utils.debug import enable_debugger
 from renesis.utils.voxcraft import vxd_creator, get_voxel_positions
 from renesis.utils.fitness import max_z, table, distance_traveled, has_fallen
+from renesis.utils.debug import enable_debugger
 from renesis.env_model.base import BaseModel
 from renesis.env_model.cppn import CPPNModel
 from renesis.env_model.growth import GrowthModel
@@ -120,6 +122,14 @@ class VoxcraftBaseEnvironment(VectorEnv):
                 initial_positions, final_positions
             )
             rewards[idx] = reward
+            if reward > 10:
+                if not os.path.exists(
+                    "/home/iffi/Projects/R-enesis/test_out/example.vxd"
+                ):
+                    with open(
+                        "/home/iffi/Projects/R-enesis/test_out/example.vxd", "w"
+                    ) as file:
+                        file.write(robot)
             self.robots[idx] = robot
             self.robot_sim_histories[idx] = record
             self.state_data[idx] = model.get_state_data()
