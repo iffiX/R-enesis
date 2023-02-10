@@ -122,14 +122,14 @@ class VoxcraftBaseEnvironment(VectorEnv):
                 initial_positions, final_positions
             )
             rewards[idx] = reward
-            if reward > 10:
-                if not os.path.exists(
-                    "/home/iffi/Projects/R-enesis/test_out/example.vxd"
-                ):
-                    with open(
-                        "/home/iffi/Projects/R-enesis/test_out/example.vxd", "w"
-                    ) as file:
-                        file.write(robot)
+            # if reward > 10:
+            #     if not os.path.exists(
+            #         "/home/iffi/Projects/R-enesis/test_out/example.vxd"
+            #     ):
+            #         with open(
+            #             "/home/iffi/Projects/R-enesis/test_out/example.vxd", "w"
+            #         ) as file:
+            #             file.write(robot)
             self.robots[idx] = robot
             self.robot_sim_histories[idx] = record
             self.state_data[idx] = model.get_state_data()
