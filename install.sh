@@ -8,8 +8,8 @@
 #conda update libgcc-ng
 #conda install -c anaconda graphviz hdf5
 
-conda install cuda -c nvidia/label/cuda-11.8.0
-conda install -c conda-forge graphviz python=3.9.0 gcc=9.4.0 gxx=9.4.0 boost
+conda install -c nvidia/label/cuda-11.7.0 -c conda-forge cuda=11.7.0 python=3.9.0 gcc=9.4.0 gxx=9.4.0 cmake graphviz boost
+# conda install -c conda-forge graphviz python=3.9.0 gcc=9.4.0 gxx=9.4.0 boost
 python -m venv venv
 venv/bin/pip install torch==1.11.0+cu113 -f https://download.pytorch.org/whl/torch_stable.html
 venv/bin/pip install -r requirements.txt
