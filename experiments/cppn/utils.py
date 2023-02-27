@@ -95,12 +95,11 @@ class ActorDistribution(TorchDistributionWrapper):
     """
     Action distribution
 
-    P(source_node, target_node, target_function, has_edge, weight, stop | X)
+    P(source_node, target_node, target_function, has_edge, weight | X)
     = P(source_node | X) * P(target_node | source_node, X)
-      * P(target_function | target_node)
+      * P(target_function | source_node, target_node)
       * P(has_edge | source_node, target_node)
       * P(weight | source_node, target_node)
-      * P(stop | X)
     """
 
     @staticmethod
@@ -121,14 +120,12 @@ class ActorDistribution(TorchDistributionWrapper):
         src_node = src_dist.deterministic_sample()
         tar_dist = self.target_node_distribution(src_node)
         tar_node = tar_dist.deterministic_sample()
-        tar_func_dist = self.target_function_distribution(tar_node)
+        tar_func_dist = self.target_function_distribution(src_node, tar_node)
         tar_func = tar_func_dist.deterministic_sample()
         has_edge_dist = self.has_edge_distribution(src_node, tar_node)
         has_edge = has_edge_dist.deterministic_sample()
         weight_dist = self.weight_distribution(src_node, tar_node)
         weight = weight_dist.deterministic_sample().squeeze(-1)
-        stop_dist = self.stop_distribution()
-        stop = stop_dist.deterministic_sample()
 
         self._action_logp = (
             src_dist.logp(src_node)
@@ -136,11 +133,10 @@ class ActorDistribution(TorchDistributionWrapper):
             + tar_func_dist.logp(tar_func)
             + has_edge_dist.logp(has_edge)
             + weight_dist.logp(weight)
-            + stop_dist.logp(stop)
         )
 
         # Return the actions. Match the order of flattened CPPN action space
-        return t.stack((src_node, tar_node, tar_func, has_edge, weight, stop), dim=1)
+        return t.stack((src_node, tar_node, tar_func, has_edge, weight), dim=1)
 
     @override(TorchDistributionWrapper)
     def sample(self):
@@ -148,14 +144,12 @@ class ActorDistribution(TorchDistributionWrapper):
         src_node = src_dist.sample()
         tar_dist = self.target_node_distribution(src_node)
         tar_node = tar_dist.sample()
-        tar_func_dist = self.target_function_distribution(tar_node)
+        tar_func_dist = self.target_function_distribution(src_node, tar_node)
         tar_func = tar_func_dist.sample()
         has_edge_dist = self.has_edge_distribution(src_node, tar_node)
         has_edge = has_edge_dist.sample()
         weight_dist = self.weight_distribution(src_node, tar_node)
         weight = weight_dist.sample().squeeze(-1)
-        stop_dist = self.stop_distribution()
-        stop = stop_dist.sample()
 
         self._action_logp = (
             src_dist.logp(src_node)
@@ -163,11 +157,10 @@ class ActorDistribution(TorchDistributionWrapper):
             + tar_func_dist.logp(tar_func)
             + has_edge_dist.logp(has_edge)
             + weight_dist.logp(weight)
-            + stop_dist.logp(stop)
         )
 
         # Return the action tuple.
-        return t.stack((src_node, tar_node, tar_func, has_edge, weight, stop), dim=1)
+        return t.stack((src_node, tar_node, tar_func, has_edge, weight), dim=1)
 
     @override(TorchDistributionWrapper)
     def logp(self, actions):
@@ -176,14 +169,12 @@ class ActorDistribution(TorchDistributionWrapper):
         tar_func = actions[:, 2].to(dtype=t.int64)
         has_edge = actions[:, 3].to(dtype=t.int64)
         weight = actions[:, 4].float()
-        stop = actions[:, 5].to(dtype=t.int64)
 
         src_dist = self.source_node_distribution()
         tar_dist = self.target_node_distribution(src_node)
-        tar_func_dist = self.target_function_distribution(tar_node)
+        tar_func_dist = self.target_function_distribution(src_node, tar_node)
         has_edge_dist = self.has_edge_distribution(src_node, tar_node)
         weight_dist = self.weight_distribution(src_node, tar_node)
-        stop_dist = self.stop_distribution()
 
         return (
             src_dist.logp(src_node)
@@ -191,7 +182,6 @@ class ActorDistribution(TorchDistributionWrapper):
             + tar_func_dist.logp(tar_func)
             + has_edge_dist.logp(has_edge)
             + weight_dist.logp(weight.unsqueeze(-1))
-            + stop_dist.logp(stop)
         )
 
     @override(TorchDistributionWrapper)
@@ -205,17 +195,15 @@ class ActorDistribution(TorchDistributionWrapper):
         src_node = src_dist.sample()
         tar_dist = self.target_node_distribution(src_node)
         tar_node = tar_dist.sample()
-        tar_func_dist = self.target_function_distribution(tar_node)
+        tar_func_dist = self.target_function_distribution(src_node, tar_node)
         has_edge_dist = self.has_edge_distribution(src_node, tar_node)
         weight_dist = self.weight_distribution(src_node, tar_node)
-        stop_dist = self.stop_distribution()
         return (
             src_dist.entropy()
             + tar_dist.entropy()
             + tar_func_dist.entropy()
             + has_edge_dist.entropy()
             + weight_dist.entropy()
-            + stop_dist.entropy()
         )
 
     @override(TorchDistributionWrapper)
@@ -232,8 +220,8 @@ class ActorDistribution(TorchDistributionWrapper):
 
         tar_node = tar_dist.sample()
 
-        tar_func_terms = self.target_function_distribution(tar_node).kl(
-            other.target_function_distribution(tar_node)
+        tar_func_terms = self.target_function_distribution(src_node, tar_node).kl(
+            other.target_function_distribution(src_node, tar_node)
         )
         has_edge_terms = self.has_edge_distribution(src_node, tar_node).kl(
             other.has_edge_distribution(src_node, tar_node)
@@ -241,16 +229,8 @@ class ActorDistribution(TorchDistributionWrapper):
         weight_terms = self.weight_distribution(src_node, tar_node).kl(
             other.weight_distribution(src_node, tar_node)
         )
-        stop_terms = self.stop_distribution().kl(other.stop_distribution())
 
-        return (
-            src_terms
-            + tar_terms
-            + tar_func_terms
-            + has_edge_terms
-            + weight_terms
-            + stop_terms
-        )
+        return src_terms + tar_terms + tar_func_terms + has_edge_terms + weight_terms
 
     def source_node_distribution(self):
         # inputs shape: [batch_size, node_num, output_feature_num]
@@ -324,13 +304,16 @@ class ActorDistribution(TorchDistributionWrapper):
         dist = TorchCategorical(logits)
         return dist
 
-    def target_function_distribution(self, target_node):
+    def target_function_distribution(self, source_node, target_node):
         # tar_node_embedding shape: [batch_size, output_feature_num]
         batch_size = self.inputs.shape[0]
+        src_node_embedding = self.inputs[:, :, 1:][range(batch_size), source_node]
         tar_node_embedding = self.inputs[:, :, 1:][range(batch_size), target_node]
 
         # logits shape: [batch_size, function_num]
-        logits = self.model.target_function_module(tar_node_embedding)
+        logits = self.model.target_function_module(
+            t.cat((src_node_embedding, tar_node_embedding), dim=1)
+        )
 
         dist = TorchCategorical(logits)
         return dist
@@ -366,14 +349,6 @@ class ActorDistribution(TorchDistributionWrapper):
         )
 
         dist = TorchDiagGaussian(param, model=None)
-        return dist
-
-    def stop_distribution(self):
-        # inputs shape: [batch_size, node_num, output_feature_num]
-        # logits shape: [batch_size, 2]
-        logits = self.model.stop_module(self.inputs[:, :, 1:])
-
-        dist = TorchCategorical(logits)
         return dist
 
 
@@ -431,23 +406,13 @@ class Actor(TorchModelV2, nn.Module):
         )
         self.target_function_module = make_mlp(
             (
-                output_feature_num,
+                output_feature_num * 2,
                 128,
                 model_config["custom_model_config"]["target_function_num"],
             )
         )
         self.has_edge_module = make_mlp((output_feature_num * 2, 128, 2))
         self.weight_module = make_mlp((output_feature_num * 2, 128, 2))
-        self.stop_module = nn.Sequential(
-            SlimFC(
-                output_feature_num,
-                128,
-                initializer=normc_initializer(0.01),
-                activation_fn=None,
-            ),
-            Mean(),
-            SlimFC(128, 2, initializer=normc_initializer(0.01), activation_fn=None),
-        )
         self._shared_base_output = None
         print_model_size(self)
 
@@ -480,8 +445,10 @@ class Actor(TorchModelV2, nn.Module):
         # shape [batch_size, node_num, output_feature_num]
         output = self.gat(nodes, new_edges, new_edge_num, new_edge_weight)
 
-        if t.any(t.isnan(output)):
-            x = self.gat(nodes, new_edges, new_edge_num, new_edge_weight)
+        # for debugging
+        # if t.any(t.isnan(output)):
+        #     x = self.gat(nodes, new_edges, new_edge_num, new_edge_weight)
+
         self._shared_base_output = output
         # action shape [batch_size, node_num, 1 + output_feature_num]
         return t.cat([node_ranks.unsqueeze(-1), output], dim=2), state

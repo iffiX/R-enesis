@@ -7,12 +7,7 @@ from ray.tune.logger import TBXLoggerCallback
 from ray.rllib.agents.ppo import PPOTrainer
 from renesis.env_model.cppn import CPPNModel
 from renesis.env.voxcraft import VoxcraftCPPNEnvironment
-from experiments.cppn.utils import (
-    CustomCallbacks,
-    DataLoggerCallback,
-    CleaningCallback1,
-    CleaningCallback2,
-)
+from experiments.cppn.utils import CustomCallbacks, DataLoggerCallback
 
 from renesis.utils.debug import enable_debugger
 
@@ -24,34 +19,36 @@ configurations in this file.
 # 1GB heap memory, 1GB object store
 ray.init(_memory=1 * (10 ** 9), object_store_memory=10 ** 9)
 
+vector_env_num_per_worker = 128
 config = {
     "env": VoxcraftCPPNEnvironment,
     "env_config": {
         "debug": False,
-        "materials": (0, 1, 2, 3),
-        "dimension_size": 5,
-        "actuation_features": ("phase_offset",),
-        "amplitude_range": (0.5, 2),
-        "frequency_range": (0.5, 4),
-        "phase_offset_range": (0, 1),
-        "max_steps": 20,
+        "dimension_size": 6,
+        "cppn_intermediate_node_num": 10,
+        "max_steps": 40,
         "reward_type": "distance_traveled",
         "base_config_path": str(
             os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "base.vxa")
         ),
         "voxel_size": 0.01,
         "fallen_threshold": 0.25,
-        "num_envs": 32,
+        "num_envs": vector_env_num_per_worker,
     },
-    "sgd_minibatch_size": 128,
-    "train_batch_size": 320,
-    "rollout_fragment_length": 10,
+    "sgd_minibatch_size": vector_env_num_per_worker * 2,
+    "train_batch_size": 40 * vector_env_num_per_worker * 2,
+    "rollout_fragment_length": 40,
     "vf_clip_param": 10 ** 5,
     "seed": np.random.randint(10 ** 5),
-    "num_workers": 1,
-    "num_gpus": 0.2,
-    "num_gpus_per_worker": 0.2,
-    "num_envs_per_worker": 32,
+    "num_workers": 2,
+    "num_gpus": 0.1,
+    "num_gpus_per_worker": 0.5,
+    "num_envs_per_worker": vector_env_num_per_worker,
+    # "num_workers": 1,
+    # "num_gpus": 0.1,
+    # "num_gpus_per_worker": 0.1,
+    # "num_envs_per_worker": vector_env_num_per_worker,
+    "placement_strategy": "SPREAD",
     "num_cpus_per_worker": 1,
     "framework": "torch",
     # Set up a separate evaluation worker set for the
@@ -61,7 +58,6 @@ config = {
     # Only for evaluation runs, render the env.
     "evaluation_config": {"render_env": False,},
     # "monitor": True,
-    # "evaluation_num_workers": 7,
     "model": {
         "custom_action_dist": "actor_dist",
         "custom_model": "actor_model",
@@ -73,8 +69,7 @@ config = {
             "layer_num": 4,
             "head_num": 3,
             "cppn_input_node_num": 4,
-            # len(materials) + len(actuation_features), computed later
-            "cppn_output_node_num": -1,
+            "cppn_output_node_num": 3,
             "target_function_num": len(CPPNModel.DEFAULT_CPPN_FUNCTIONS),
         },
     },
@@ -106,31 +101,22 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
     if args.debug:
-        # config["env_config"]["debug"] = True
-        # config["env_config"]["debug_ip"] = args.debug_ip
-        # config["env_config"]["debug_port"] = args.debug_port
-        config["model"]["custom_model_config"]["debug"] = True
-        config["model"]["custom_model_config"]["debug_ip"] = args.debug_ip
-        config["model"]["custom_model_config"]["debug_port"] = args.debug_port
-
-    config["model"]["custom_model_config"]["cppn_output_node_num"] = len(
-        config["env_config"]["materials"]
-    ) + len(config["env_config"]["actuation_features"])
+        config["env_config"]["debug"] = True
+        config["env_config"]["debug_ip"] = args.debug_ip
+        config["env_config"]["debug_port"] = args.debug_port
+        # config["model"]["custom_model_config"]["debug"] = True
+        # config["model"]["custom_model_config"]["debug_ip"] = args.debug_ip
+        # config["model"]["custom_model_config"]["debug_port"] = args.debug_port
 
     tune.run(
-        DebugPPOTrainer,
+        # DebugPPOTrainer,
+        PPOTrainer,
         name="",
         config=config,
         checkpoint_freq=1,
         keep_checkpoints_num=2,
         stop={"timesteps_total": 100000, "episodes_total": 10000},
-        # Order is important! We want to log videos but not letting
-        # loggers automatically added by ray.tune to see it
-        callbacks=[
-            DataLoggerCallback(),
-            CleaningCallback1(),
-            TBXLoggerCallback(),
-            CleaningCallback2(),
-        ]
+        # Order is important!
+        callbacks=[DataLoggerCallback(), TBXLoggerCallback()]
         # restore=,
     )

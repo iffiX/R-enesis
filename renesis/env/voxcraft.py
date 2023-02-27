@@ -78,23 +78,30 @@ class VoxcraftBaseEnvironment(VectorEnv):
                 model.step(action)
 
         rewards = self.get_rewards(all_finished)
-        print(f"Rewards: {rewards}")
+        # print(f"Rewards: {rewards}")
 
-        for i, finish in enumerate(self.check_finished()):
-            if finish:
-                if rewards[i] > self.best_reward:
-                    self.best_reward = rewards[i]
-                    self.best_finished_robot = self.robots[i]
-                    self.best_finished_robot_sim_history = self.robot_sim_histories[i]
-                    self.best_finished_robot_state_data = self.state_data[i]
+        # for i, finish in enumerate(self.check_finished()):
+        #     if finish:
+        #         if rewards[i] > self.best_reward:
+        #             self.best_reward = rewards[i]
+        #             self.best_finished_robot = self.robots[i]
+        #             self.best_finished_robot_sim_history = self.robot_sim_histories[i]
+        #             self.best_finished_robot_state_data = self.state_data[i]
+
+        for i in range(self.num_envs):
+            if rewards[i] > self.best_reward:
+                self.best_reward = rewards[i]
+                self.best_finished_robot = self.robots[i]
+                self.best_finished_robot_sim_history = self.robot_sim_histories[i]
+                self.best_finished_robot_state_data = self.state_data[i]
 
         reward_diffs = [
             reward - previous_reward
             for reward, previous_reward in zip(rewards, self.previous_rewards)
         ]
-        print(f"Reward diffs: {reward_diffs}")
+        # print(f"Reward diffs: {reward_diffs}")
         self.previous_rewards = rewards
-        print(f"Finished: {self.check_finished()}")
+        # print(f"Finished: {self.check_finished()}")
         return (
             [model.observe() for model in self.env_models],
             reward_diffs,
@@ -103,6 +110,19 @@ class VoxcraftBaseEnvironment(VectorEnv):
         )
 
     def get_rewards(self, all_finished):
+        """
+        Returns the list of rewards of all sub environments.
+
+        For sub environments that are not finished in current step, i.e. has executed
+        a step, their reward are updated. Otherwise the old reward is returned.
+
+        Args:
+            all_finished: A list of bool values indicating whether current sub
+                environment is finished.
+
+        Returns:
+            A list of float reward value for all sub environments.
+        """
         rewards = copy.deepcopy(self.previous_rewards)
         valid_models = []
         valid_model_indices = []
@@ -147,12 +167,30 @@ class VoxcraftBaseEnvironment(VectorEnv):
         for model in env_models:
             sizes, representation = model.get_robot()
             robots.append(vxd_creator(sizes, representation, record_history=True))
+
         begin = time()
-        out = self.simulator.run_sims([self.base_config] * len(robots), robots)
-        end = time()
+        for attempt in range(3):
+            try:
+                out = self.simulator.run_sims([self.base_config] * len(robots), robots)
+                end = time()
+            except Exception as e:
+                print(f"Failed attempt {attempt + 1}")
+                if attempt == 2:
+                    print(f"Final attempt failed")
+                    dump_dir = os.path.expanduser(f"~/renesis_sim_dump/{begin}")
+                    os.makedirs(dump_dir, exist_ok=True)
+                    print(f"Debug info saved to {dump_dir}")
+                    with open(os.path.join(dump_dir, "base.vxa"), "w") as file:
+                        file.write(self.base_config)
+                    for i, robot in enumerate(robots):
+                        with open(os.path.join(dump_dir, f"{i}.vxd"), "w") as file:
+                            file.write(robot)
+                    raise e
+            else:
+                break
         print(
-            f"{self.num_envs} simulations total {end - begin:.3f}s, "
-            f"average {(end - begin) / self.num_envs:.3f}s"
+            f"{len(robots)} simulations total {end - begin:.3f}s, "
+            f"average {(end - begin) / len(robots):.3f}s"
         )
         return robots, out
 
@@ -219,19 +257,15 @@ class VoxcraftCPPNEnvironment(VoxcraftBaseEnvironment):
             enable_debugger(config["debug_ip"], config["debug_port"])
         env_models = [
             CPPNModel(
-                materials=config["materials"],
                 dimension_size=config["dimension_size"],
-                actuation_features=config["actuation_features"],
-                amplitude_range=config["amplitude_range"],
-                frequency_range=config["frequency_range"],
-                phase_offset_range=config["phase_offset_range"],
+                cppn_intermediate_node_num=config["cppn_intermediate_node_num"],
             )
             for _ in range(config["num_envs"])
         ]
         super().__init__(config, env_models)
 
-    def get_rewards(self, all_finished):
-        base_rewards = super().get_rewards(all_finished)
-        for idx, model in enumerate(self.env_models):
-            base_rewards[idx] += model.get_cppn_reward()
-        return base_rewards
+    # def get_rewards(self, all_finished):
+    #     base_rewards = super().get_rewards(all_finished)
+    #     for idx, model in enumerate(self.env_models):
+    #         base_rewards[idx] += model.get_cppn_reward()
+    #     return base_rewards

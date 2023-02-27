@@ -15,6 +15,10 @@ from ray.rllib.utils.spaces.repeated import Repeated
 from .base import BaseModel
 
 
+def sigmoid(x):
+    return 1 / (1 + np.exp(-x))
+
+
 def get_gaussian_pdf(mu=0, std=1):
     divider = std * np.sqrt(2 * np.pi)
 
@@ -187,8 +191,7 @@ class CPPN:
             self.get_source_node_mask(**get_mask_args)[source_node] != 1
             or self.get_target_node_mask(source_node, **get_mask_args)[target_node] != 1
         ):
-            print("Invalid edge")
-            return
+            raise ValueError("Invalid edge")
 
         if self.node_ranks[target_node] == -1:
             # Initialize target node rank if its -1
@@ -432,25 +435,12 @@ class CPPNModel(BaseModel):
 
     def __init__(
         self,
-        materials=(0, 1, 2),
         dimension_size=20,
-        actuation_features=("amplitude", "frequency", "phase_offset"),
-        amplitude_range=(0, 1),
-        frequency_range=(0, 1),
-        phase_offset_range=(-1, 1),
         cppn_intermediate_node_num: int = 20,
         cppn_functions: OrderedDictType[str, Callable[[np.ndarray], np.ndarray]] = None,
     ):
         super().__init__()
-        for a in actuation_features:
-            assert a in ("amplitude", "frequency", "phase_offset")
-
-        self.materials = materials
         self.dimension_size = dimension_size
-        self.actuation_features = actuation_features
-        self.amplitude_range = amplitude_range
-        self.frequency_range = frequency_range
-        self.phase_offset_range = phase_offset_range
         self.center_voxel_offset = self.dimension_size // 2
         self.cppn_intermediate_node_num = cppn_intermediate_node_num
 
@@ -459,13 +449,9 @@ class CPPNModel(BaseModel):
         self.cppn_functions = cppn_functions or self.DEFAULT_CPPN_FUNCTIONS
 
         self.cppn = CPPN(
-            4,
-            len(self.materials) + len(self.actuation_features),
-            self.cppn_intermediate_node_num,
-            functions=self.cppn_functions,
+            4, 3, self.cppn_intermediate_node_num, functions=self.cppn_functions,
         )
 
-        self.finished = False
         self.voxels = None
         self.occupied = None
         self.num_non_zero_voxel = 0
@@ -474,7 +460,7 @@ class CPPNModel(BaseModel):
     @property
     def action_space(self):
         return Box(
-            low=np.array([0, 0, 0, 0, -np.inf, 0]),
+            low=np.array([0, 0, 0, 0, -np.inf]),
             high=np.array(
                 [
                     self.cppn.node_num - 1,
@@ -482,7 +468,6 @@ class CPPNModel(BaseModel):
                     self.cppn.function_num - 1,
                     1,
                     np.inf,
-                    1,
                 ]
             ),
         )
@@ -531,35 +516,24 @@ class CPPNModel(BaseModel):
         )
 
     def reset(self):
-        self.finished = False
         self.steps = 0
         self.cppn = CPPN(
-            4,
-            len(self.materials) + len(self.actuation_features),
-            self.cppn_intermediate_node_num,
-            functions=self.cppn_functions,
+            4, 3, self.cppn_intermediate_node_num, functions=self.cppn_functions,
         )
 
     def is_finished(self):
-        return self.finished
+        return False
 
     def is_robot_empty(self):
         return self.num_non_zero_voxel == 0
 
     def step(self, action: np.ndarray):
-        if not self.finished:
-            # print(action)
-            self.cppn.step(
-                int(action[0]),
-                int(action[1]),
-                int(action[2]),
-                int(action[3]),
-                action[4],
-            )
-            self.update_voxels()
-            if self.steps >= 10:
-                self.finished = bool(action[5])
-            self.steps += 1
+        # print(action)
+        self.cppn.step(
+            int(action[0]), int(action[1]), int(action[2]), int(action[3]), action[4],
+        )
+        self.update_voxels()
+        self.steps += 1
 
     def observe(self):
         # Repeated needs the observation length to be at least 1
@@ -594,49 +568,13 @@ class CPPNModel(BaseModel):
 
         for z in range(min_z, max_z):
             layer_representation = (
-                self.voxels[min_x:max_x, min_y:max_y, z, 0]
+                self.voxels[min_x:max_x, min_y:max_y, z]
                 .astype(int)
                 .flatten(order="F")
                 .tolist(),
-                self.rescale(
-                    self.voxels[
-                        min_x:max_x,
-                        min_y:max_y,
-                        z,
-                        1 + self.actuation_features.index("amplitude"),
-                    ],
-                    self.amplitude_range,
-                )
-                .flatten(order="F")
-                .tolist()
-                if "amplitude" in self.actuation_features
-                else None,
-                self.rescale(
-                    self.voxels[
-                        min_x:max_x,
-                        min_y:max_y,
-                        z,
-                        1 + self.actuation_features.index("frequency"),
-                    ],
-                    self.frequency_range,
-                )
-                .flatten(order="F")
-                .tolist()
-                if "frequency" in self.actuation_features
-                else None,
-                self.rescale(
-                    self.voxels[
-                        min_x:max_x,
-                        min_y:max_y,
-                        z,
-                        1 + self.actuation_features.index("phase_offset"),
-                    ],
-                    self.phase_offset_range,
-                )
-                .flatten(order="F")
-                .tolist()
-                if "phase_offset" in self.actuation_features
-                else None,
+                None,
+                None,
+                None,
             )
             representation.append(layer_representation)
         return (max_x - min_x, max_y - min_y, max_z - min_z), representation
@@ -644,7 +582,7 @@ class CPPNModel(BaseModel):
     def get_state_data(self):
         return self.cppn.get_graphs(
             ["x", "y", "z", "d"],
-            [f"mat_{mat}" for mat in self.materials] + list(self.actuation_features),
+            ["presence?", "passive?", "phase?"],
             {
                 "sin": None,
                 "gaussian": None,
@@ -659,43 +597,43 @@ class CPPNModel(BaseModel):
             else None,
         )
 
-    def get_cppn_reward(self):
-        """
-        Every connected input/output node has +1 reward.
-        Every intermediate node not connected to an output node has -1 reward
-        """
-        node_mask = [True] * (self.cppn.input_node_num + self.cppn.output_node_num) + [
-            False
-        ] * self.cppn.intermediate_node_num
-        self.cppn.recursive_find_dependent_nodes(
-            list(
-                range(
-                    self.cppn.input_node_num,
-                    self.cppn.input_node_num + self.cppn.output_node_num,
-                )
-            ),
-            node_mask,
-        )
-        reward = 0
-        for i in range(self.cppn.input_node_num):
-            if len(self.cppn.out_edges[i]) > 0:
-                reward += 1
-        for i in range(
-            self.cppn.input_node_num,
-            self.cppn.input_node_num + self.cppn.output_node_num,
-        ):
-            if len(self.cppn.in_edges[i]) > 0:
-                reward += 1
-        # print(f"i/o reward: {reward}")
-        for i in range(
-            self.cppn.input_node_num + self.cppn.output_node_num, len(self.cppn.nodes)
-        ):
-            if self.cppn.node_ranks[i] > 0 and not node_mask[i]:
-                reward -= 1
-        # print(f"i/o + intermediate reward: {reward}")
-        # print(self.cppn.node_ranks)
-        # print(node_mask)
-        return reward
+    # def get_cppn_reward(self):
+    #     """
+    #     Every connected input/output node has +1 reward.
+    #     Every intermediate node not connected to an output node has -1 reward
+    #     """
+    #     node_mask = [True] * (self.cppn.input_node_num + self.cppn.output_node_num) + [
+    #         False
+    #     ] * self.cppn.intermediate_node_num
+    #     self.cppn.recursive_find_dependent_nodes(
+    #         list(
+    #             range(
+    #                 self.cppn.input_node_num,
+    #                 self.cppn.input_node_num + self.cppn.output_node_num,
+    #             )
+    #         ),
+    #         node_mask,
+    #     )
+    #     reward = 0
+    #     for i in range(self.cppn.input_node_num):
+    #         if len(self.cppn.out_edges[i]) > 0:
+    #             reward += 1
+    #     for i in range(
+    #         self.cppn.input_node_num,
+    #         self.cppn.input_node_num + self.cppn.output_node_num,
+    #     ):
+    #         if len(self.cppn.in_edges[i]) > 0:
+    #             reward += 1
+    #     # print(f"i/o reward: {reward}")
+    #     for i in range(
+    #         self.cppn.input_node_num + self.cppn.output_node_num, len(self.cppn.nodes)
+    #     ):
+    #         if self.cppn.node_ranks[i] > 0 and not node_mask[i]:
+    #             reward -= 1
+    #     # print(f"i/o + intermediate reward: {reward}")
+    #     # print(self.cppn.node_ranks)
+    #     # print(node_mask)
+    #     return reward
 
     def update_voxels(self):
         # generate coordinates
@@ -714,31 +652,30 @@ class CPPNModel(BaseModel):
         # splitted by column
         inputs = [coords[:, 0], coords[:, 1], coords[:, 2]] + [distances]
 
-        # Outputs are of shape (coord_num, material_num + actuation_feature_num)
-        # splitted by column
-        outputs = list(self.cppn.eval(inputs))
+        # Outputs are List[array(coord_num,), array(coord_num,), array(coord_num,)]
+        # first logit is used to control voxel presence
+        # second logit is used to control voxel passiveness
+        # third logit is used to control phase (sin/cos)
+        outputs = [sigmoid(x) for x in self.cppn.eval(inputs)]
 
-        material_logits = np.stack(outputs[: len(self.materials)])
-        material = (
-            np.array(self.materials)[np.argmax(material_logits, axis=0)]
-            if not np.all(material_logits == 0)
-            else np.array([0 for _ in range(material_logits.shape[1])])
+        material = np.where(
+            outputs[0] < 0.5,
+            0,
+            np.where(outputs[1] < 0.5, 1, np.where(outputs[2] < 0.5, 2, 3)),
         )
-        self.voxels = np.zeros(
-            [self.dimension_size] * 3 + [1 + len(self.actuation_features)], dtype=float,
-        )
+        self.voxels = np.zeros([self.dimension_size] * 3, dtype=float,)
         self.voxels[
             coords[:, 0] + self.center_voxel_offset,
             coords[:, 1] + self.center_voxel_offset,
             coords[:, 2] + self.center_voxel_offset,
-        ] = np.stack([material] + outputs[len(self.materials) :], axis=1)
+        ] = material
         # print("outputs:")
         # print(outputs)
         # print("voxels:")
         # print(self.voxels)
-        self.occupied = self.voxels[:, :, :, 0] != 0
+        self.occupied = self.voxels[:, :, :] != 0
         self.num_non_zero_voxel = np.sum(self.occupied.astype(int))
 
-    @staticmethod
-    def rescale(data: np.ndarray, rescale_range: Tuple[float, float]):
-        return data * (rescale_range[1] - rescale_range[0]) + rescale_range[0]
+    # @staticmethod
+    # def rescale(data: np.ndarray, rescale_range: Tuple[float, float]):
+    #     return data * (rescale_range[1] - rescale_range[0]) + rescale_range[0]
