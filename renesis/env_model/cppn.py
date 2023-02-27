@@ -325,7 +325,8 @@ class CPPN:
                 for every node that is depended on by an output the mask entry will be True.
         """
         for root in roots:
-            mask[root] = True
+            if len(self.in_edges[root]) > 0 or isinstance(self.nodes[root], InputNode):
+                mask[root] = True
             if not isinstance(self.nodes[root], InputNode):
                 self.recursive_find_dependent_nodes(list(self.in_edges[root]), mask)
 
