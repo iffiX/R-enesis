@@ -2,13 +2,14 @@ import os
 import copy
 import graphviz
 import numpy as np
-from renesis.env_model.cppn import CPPN
+from renesis.env_model.cppn import CPPN, CPPNBinaryTreeModel
 from renesis.env.voxcraft import VoxcraftCPPNBinaryTreeEnvironment
 from renesis.utils.media import create_video_subproc
 from renesis.sim import VXHistoryRenderer
 
-MAX_ITERATIONS = 40
-SELECTION_SIZE = 128 * 7
+INITIAL_STEPS = 40
+MAX_ITERATIONS = 100
+SELECTION_SIZE = 5 * 40
 VARIATION_SIZE = 2
 # OUTPUT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "output")
 OUTPUT_PATH = "/home/mlw0504/data/workspace/renesis"
@@ -37,6 +38,27 @@ def render(history):
         return None
 
 
+def select_action(model: CPPNBinaryTreeModel):
+    node_ranks = model.observe()["node_ranks"]
+    source_node_mask = CPPN.get_source_node_mask(4, 3, node_ranks)
+    # Randomly sample a valid source node
+    source_node = np.random.choice(np.where(source_node_mask.astype(bool))[0])
+    target_node_mask = CPPN.get_target_node_mask(source_node, 4, 3, node_ranks)
+    # Randomly sample a valid target node
+    target_node = np.random.choice(np.where(target_node_mask.astype(bool))[0])
+    target_function = np.random.choice(list(range(len(model.cppn_functions))))
+    has_edge = np.random.choice([0, 1])
+    weight = float(np.random.normal(0, 1, 1))
+    return np.array(
+        [source_node, target_node, target_function, has_edge, weight], dtype=float,
+    )
+
+
+def init_model(model: CPPNBinaryTreeModel, step: int):
+    for i in range(step):
+        model.step(select_action(model))
+
+
 if __name__ == "__main__":
     env = VoxcraftCPPNBinaryTreeEnvironment(
         {
@@ -56,25 +78,15 @@ if __name__ == "__main__":
     )
     env.vector_reset()
     best_reward = -np.inf
+
+    for model in env.env_models:
+        init_model(model, INITIAL_STEPS)
+
     for step in range(MAX_ITERATIONS):
         actions = []
         for model in env.env_models:
-            node_ranks = model.observe()["node_ranks"]
-            source_node_mask = CPPN.get_source_node_mask(4, 3, node_ranks)
-            # Randomly sample a valid source node
-            source_node = np.random.choice(np.where(source_node_mask.astype(bool))[0])
-            target_node_mask = CPPN.get_target_node_mask(source_node, 4, 3, node_ranks)
-            # Randomly sample a valid target node
-            target_node = np.random.choice(np.where(target_node_mask.astype(bool))[0])
-            target_function = np.random.choice(list(range(len(model.cppn_functions))))
-            has_edge = np.random.choice([0, 1])
-            weight = float(np.random.normal(0, 1, 1))
-            actions.append(
-                np.array(
-                    [source_node, target_node, target_function, has_edge, weight],
-                    dtype=float,
-                )
-            )
+            actions.append(select_action(model))
+
         _, rewards, *__ = env.vector_step(actions)
 
         print(

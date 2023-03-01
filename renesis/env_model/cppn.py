@@ -57,6 +57,7 @@ class CPPN:
         output_aggregator: Callable[[List[np.ndarray]], np.ndarray] = lambda x: np.sum(
             x, axis=0
         ),
+        require_dependency: bool = True,
     ):
         """
         Create a compositional pattern producing network (CPPN) with
@@ -67,6 +68,8 @@ class CPPN:
             output_node_num: Number of output nodes
             intermediate_node_num: Number of intermediate nodes
             functions: A dictionary of functions where intermediate nodes can choose from
+            output_aggregator: Aggregator function for output nodes
+            require_dependency: Whether require dependency for source and target nodes.
         """
         for f in functions:
             if len(f) == 0:
@@ -76,6 +79,7 @@ class CPPN:
         self.intermediate_node_num = intermediate_node_num
         self.functions = functions
         self.output_aggregator = output_aggregator
+        self.require_dependency = require_dependency
 
         self.nodes = []
         self.nodes += [InputNode() for _ in range(input_node_num)]
@@ -124,6 +128,12 @@ class CPPN:
                 features[i, 3 + function_names.index(self.nodes[i])] = 1
         return features
 
+    def get_node_rans(self):
+        if self.require_dependency:
+            return self.node_ranks
+        else:
+            return np.full_like(self.node_ranks, -2)
+
     def get_edges_and_weights(self):
         edges_and_weights = np.zeros([len(self.edges_weights), 3], dtype=float)
         for idx, (edge, weight) in enumerate(self.edges_weights.items()):
@@ -144,7 +154,7 @@ class CPPN:
         # The mask is always 0 for output nodes
         # The mask is 1 For input/intermediate nodes
         # if node rank has been initialized
-        mask = (node_ranks != -1).astype(float)
+        mask = (np.logical_or(node_ranks != -1, node_ranks == -2)).astype(float)
         mask[input_node_num : input_node_num + output_node_num] = 0
         return mask
 
@@ -173,7 +183,8 @@ class CPPN:
 
         # This way no cycle can ever be formed
         mask = np.logical_or(
-            node_ranks > node_ranks[source_node], node_ranks == -1
+            node_ranks > node_ranks[source_node],
+            np.logical_or(node_ranks == -1, node_ranks == -2),
         ).astype(float)
         mask[input_node_num : input_node_num + output_node_num] = 1
         return mask
@@ -191,13 +202,13 @@ class CPPN:
             "output_node_num": self.output_node_num,
             "node_ranks": self.node_ranks,
         }
-        if (
+        if self.require_dependency and (
             self.get_source_node_mask(**get_mask_args)[source_node] != 1
             or self.get_target_node_mask(source_node, **get_mask_args)[target_node] != 1
         ):
             raise ValueError("Invalid edge")
 
-        if self.node_ranks[target_node] == -1:
+        if self.require_dependency and self.node_ranks[target_node] == -1:
             # Initialize target node rank if its -1
             self.node_ranks[target_node] = self.node_ranks[source_node] + 1
 
@@ -445,12 +456,14 @@ class CPPNBaseModel(BaseModel):
         dimension_size=20,
         cppn_intermediate_node_num: int = 20,
         cppn_functions: OrderedDictType[str, Callable[[np.ndarray], np.ndarray]] = None,
+        cppn_require_dependency: bool = True,
     ):
         super().__init__()
         self.dimension_size = dimension_size
         self.center_voxel_offset = self.dimension_size // 2
         self.cppn_output_node_tags = cppn_output_node_tags
         self.cppn_intermediate_node_num = cppn_intermediate_node_num
+        self.cppn_require_dependency = cppn_require_dependency
 
         # input: x, y, z, d
         # output: presence, likelihood * material num, actuation features
@@ -461,6 +474,7 @@ class CPPNBaseModel(BaseModel):
             len(self.cppn_output_node_tags),
             self.cppn_intermediate_node_num,
             functions=self.cppn_functions,
+            require_dependency=cppn_require_dependency,
         )
 
         self.voxels = None
@@ -533,6 +547,7 @@ class CPPNBaseModel(BaseModel):
             len(self.cppn_output_node_tags),
             self.cppn_intermediate_node_num,
             functions=self.cppn_functions,
+            require_dependency=self.cppn_require_dependency,
         )
 
     def is_finished(self):
@@ -631,12 +646,14 @@ class CPPNBinaryTreeModel(CPPNBaseModel):
         dimension_size=20,
         cppn_intermediate_node_num: int = 20,
         cppn_functions: OrderedDictType[str, Callable[[np.ndarray], np.ndarray]] = None,
+        cppn_require_dependency: bool = True,
     ):
         super().__init__(
             ["presence?", "passive?", "phase?"],
-            dimension_size,
-            cppn_intermediate_node_num,
-            cppn_functions,
+            dimension_size=dimension_size,
+            cppn_intermediate_node_num=cppn_intermediate_node_num,
+            cppn_functions=cppn_functions,
+            cppn_require_dependency=cppn_require_dependency,
         )
 
     def get_robot(self):
@@ -718,12 +735,14 @@ class CPPNBinaryTreeWithPhaseOffsetModel(CPPNBaseModel):
         dimension_size=20,
         cppn_intermediate_node_num: int = 20,
         cppn_functions: OrderedDictType[str, Callable[[np.ndarray], np.ndarray]] = None,
+        cppn_require_dependency: bool = True,
     ):
         super().__init__(
             ["presence?", "passive?", "phase_offset"],
-            dimension_size,
-            cppn_intermediate_node_num,
-            cppn_functions,
+            dimension_size=dimension_size,
+            cppn_intermediate_node_num=cppn_intermediate_node_num,
+            cppn_functions=cppn_functions,
+            cppn_require_dependency=cppn_require_dependency,
         )
 
     def get_robot(self):
