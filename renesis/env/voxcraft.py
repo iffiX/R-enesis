@@ -224,7 +224,7 @@ class VoxcraftGrowthEnvironment(VoxcraftBaseEnvironment):
     metadata = {"render.modes": ["ansi"]}
 
     def __init__(self, config):
-        if config["debug"]:
+        if config.get("debug", False):
             enable_debugger(config["debug_ip"], config["debug_port"])
         env_models = [
             GrowthModel(
@@ -246,7 +246,7 @@ class VoxcraftCPPNEnvironment(VoxcraftBaseEnvironment):
     metadata = {"render.modes": ["ansi"]}
 
     def __init__(self, config):
-        if config["debug"]:
+        if config.get("debug", False):
             enable_debugger(config["debug_ip"], config["debug_port"])
         env_models = [
             CPPNModel(

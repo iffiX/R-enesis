@@ -7,10 +7,11 @@ from renesis.env.voxcraft import VoxcraftCPPNEnvironment
 from renesis.utils.media import create_video_subproc
 from renesis.sim import VXHistoryRenderer
 
-MAX_ITERATIONS = 40 * 7
-SELECTION_SIZE = 128
+MAX_ITERATIONS = 40
+SELECTION_SIZE = 128 * 7
 VARIATION_SIZE = 2
-OUTPUT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "output")
+# OUTPUT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "output")
+OUTPUT_PATH = "/home/mlw0504/data/workspace/renesis"
 
 
 def top_k_indicies(values, k):
@@ -23,7 +24,6 @@ def render(history):
         renderer.render()
         frames = renderer.get_frames()
         if frames.ndim == 4:
-            print("History saved")
             return frames
         else:
             print("Rendering finished, but no frames produced")
@@ -62,10 +62,10 @@ if __name__ == "__main__":
             node_ranks = model.observe()["node_ranks"]
             source_node_mask = CPPN.get_source_node_mask(4, 3, node_ranks)
             # Randomly sample a valid source node
-            source_node = np.random.choice(np.where(source_node_mask))
+            source_node = np.random.choice(np.where(source_node_mask.astype(bool))[0])
             target_node_mask = CPPN.get_target_node_mask(source_node, 4, 3, node_ranks)
             # Randomly sample a valid target node
-            target_node = np.random.choice(np.where(target_node_mask))
+            target_node = np.random.choice(np.where(target_node_mask.astype(bool))[0])
             target_function = np.random.choice(list(range(len(model.cppn_functions))))
             has_edge = np.random.choice([0, 1])
             weight = float(np.random.normal(0, 1, 1))
@@ -79,10 +79,10 @@ if __name__ == "__main__":
 
         print(
             f"Step {step}: "
-            f"\tbest: {env.best_reward} "
-            f"\tmax: {np.max(rewards)} "
-            f"\tmean: {np.mean(rewards)} "
-            f"\tmin: {np.min(rewards)}"
+            f"\tbest: {env.best_reward:.4f} "
+            f"\tmax: {np.max(rewards):.4f} "
+            f"\tmean: {np.mean(rewards):.4f} "
+            f"\tmin: {np.min(rewards):.4f}"
         )
         if env.best_reward > best_reward:
             best_reward = env.best_reward
@@ -101,27 +101,22 @@ if __name__ == "__main__":
             frames = render(history)
 
             if frames is not None:
-                path = os.path.join(
-                    self._trial_local_dir[trial], f"rendered_{step:08d}.gif"
-                )
-                print(f"Saving rendered results to {path}")
+                path = os.path.join(OUTPUT_PATH, f"rendered_{step:08d}.gif")
                 wait = create_video_subproc(
                     [f for f in frames],
-                    path=self._trial_local_dir[trial],
+                    path=OUTPUT_PATH,
                     filename=f"rendered_{step:08d}",
                     extension=".gif",
                 )
-                path = os.path.join(OUTPUT_PATH, f"robot-{step:08d}.vxd")
-                with open(path, "w") as file:
-                    print(f"Saving robot to {path}")
+                with open(
+                    os.path.join(OUTPUT_PATH, f"robot-{step:08d}.vxd"), "w"
+                ) as file:
                     file.write(robot)
-                path = os.path.join(OUTPUT_PATH, f"run-{step:08d}.history")
-                with open(path, "w") as file:
-                    print(f"Saving history to {path}")
+                with open(
+                    os.path.join(OUTPUT_PATH, f"run-{step:08d}.history"), "w"
+                ) as file:
                     file.write(history)
                 wait()
-
-        print("Saving completed")
 
         # Select population with highest rewards
         best_indicies = top_k_indicies(rewards, SELECTION_SIZE)
