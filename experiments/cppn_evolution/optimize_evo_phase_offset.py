@@ -3,7 +3,7 @@ import copy
 import graphviz
 import numpy as np
 from renesis.env_model.cppn import CPPN
-from renesis.env.voxcraft import VoxcraftCPPNBinaryTreeEnvironment
+from renesis.env.voxcraft import VoxcraftCPPNBinaryTreeWithPhaseOffsetEnvironment
 from renesis.utils.media import create_video_subproc
 from renesis.sim import VXHistoryRenderer
 
@@ -11,7 +11,7 @@ MAX_ITERATIONS = 40
 SELECTION_SIZE = 128 * 7
 VARIATION_SIZE = 2
 # OUTPUT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "output")
-OUTPUT_PATH = "/home/mlw0504/data/workspace/renesis"
+OUTPUT_PATH = "/home/mlw0504/data/workspace/renesis2"
 
 
 def top_k_indicies(values, k):
@@ -38,7 +38,7 @@ def render(history):
 
 
 if __name__ == "__main__":
-    env = VoxcraftCPPNBinaryTreeEnvironment(
+    env = VoxcraftCPPNBinaryTreeWithPhaseOffsetEnvironment(
         {
             "dimension_size": 6,
             "cppn_intermediate_node_num": 10,

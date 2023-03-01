@@ -19,6 +19,10 @@ def sigmoid(x):
     return 1 / (1 + np.exp(-x))
 
 
+def rescale(data: np.ndarray, rescale_range: Tuple[float, float]):
+    return data * (rescale_range[1] - rescale_range[0]) + rescale_range[0]
+
+
 def get_gaussian_pdf(mu=0, std=1):
     divider = std * np.sqrt(2 * np.pi)
 
@@ -418,7 +422,7 @@ class CPPN:
         return graph
 
 
-class CPPNModel(BaseModel):
+class CPPNBaseModel(BaseModel):
     DEFAULT_CPPN_FUNCTIONS = OrderedDict(
         [
             ("sin", wrap_with_aggregator(np.sin)),
@@ -437,6 +441,7 @@ class CPPNModel(BaseModel):
 
     def __init__(
         self,
+        cppn_output_node_tags: List[str],
         dimension_size=20,
         cppn_intermediate_node_num: int = 20,
         cppn_functions: OrderedDictType[str, Callable[[np.ndarray], np.ndarray]] = None,
@@ -444,6 +449,7 @@ class CPPNModel(BaseModel):
         super().__init__()
         self.dimension_size = dimension_size
         self.center_voxel_offset = self.dimension_size // 2
+        self.cppn_output_node_tags = cppn_output_node_tags
         self.cppn_intermediate_node_num = cppn_intermediate_node_num
 
         # input: x, y, z, d
@@ -451,7 +457,10 @@ class CPPNModel(BaseModel):
         self.cppn_functions = cppn_functions or self.DEFAULT_CPPN_FUNCTIONS
 
         self.cppn = CPPN(
-            4, 3, self.cppn_intermediate_node_num, functions=self.cppn_functions,
+            4,
+            len(self.cppn_output_node_tags),
+            self.cppn_intermediate_node_num,
+            functions=self.cppn_functions,
         )
 
         self.voxels = None
@@ -520,7 +529,10 @@ class CPPNModel(BaseModel):
     def reset(self):
         self.steps = 0
         self.cppn = CPPN(
-            4, 3, self.cppn_intermediate_node_num, functions=self.cppn_functions,
+            4,
+            len(self.cppn_output_node_tags),
+            self.cppn_intermediate_node_num,
+            functions=self.cppn_functions,
         )
 
     def is_finished(self):
@@ -551,40 +563,12 @@ class CPPNModel(BaseModel):
         return result
 
     def get_robot(self):
-        x_occupied = [
-            x for x in range(self.occupied.shape[0]) if np.any(self.occupied[x])
-        ]
-        y_occupied = [
-            y for y in range(self.occupied.shape[1]) if np.any(self.occupied[:, y])
-        ]
-        z_occupied = [
-            z for z in range(self.occupied.shape[2]) if np.any(self.occupied[:, :, z])
-        ]
-        min_x = min(x_occupied)
-        max_x = max(x_occupied) + 1
-        min_y = min(y_occupied)
-        max_y = max(y_occupied) + 1
-        min_z = min(z_occupied)
-        max_z = max(z_occupied) + 1
-        representation = []
-
-        for z in range(min_z, max_z):
-            layer_representation = (
-                self.voxels[min_x:max_x, min_y:max_y, z]
-                .astype(int)
-                .flatten(order="F")
-                .tolist(),
-                None,
-                None,
-                None,
-            )
-            representation.append(layer_representation)
-        return (max_x - min_x, max_y - min_y, max_z - min_z), representation
+        raise NotImplementedError()
 
     def get_state_data(self):
         return self.cppn.get_graphs(
             ["x", "y", "z", "d"],
-            ["presence?", "passive?", "phase?"],
+            self.cppn_output_node_tags,
             {
                 "sin": None,
                 "gaussian": None,
@@ -638,6 +622,55 @@ class CPPNModel(BaseModel):
     #     return reward
 
     def update_voxels(self):
+        raise NotImplementedError()
+
+
+class CPPNBinaryTreeModel(CPPNBaseModel):
+    def __init__(
+        self,
+        dimension_size=20,
+        cppn_intermediate_node_num: int = 20,
+        cppn_functions: OrderedDictType[str, Callable[[np.ndarray], np.ndarray]] = None,
+    ):
+        super().__init__(
+            ["presence?", "passive?", "phase?"],
+            dimension_size,
+            cppn_intermediate_node_num,
+            cppn_functions,
+        )
+
+    def get_robot(self):
+        x_occupied = [
+            x for x in range(self.occupied.shape[0]) if np.any(self.occupied[x])
+        ]
+        y_occupied = [
+            y for y in range(self.occupied.shape[1]) if np.any(self.occupied[:, y])
+        ]
+        z_occupied = [
+            z for z in range(self.occupied.shape[2]) if np.any(self.occupied[:, :, z])
+        ]
+        min_x = min(x_occupied)
+        max_x = max(x_occupied) + 1
+        min_y = min(y_occupied)
+        max_y = max(y_occupied) + 1
+        min_z = min(z_occupied)
+        max_z = max(z_occupied) + 1
+        representation = []
+
+        for z in range(min_z, max_z):
+            layer_representation = (
+                self.voxels[min_x:max_x, min_y:max_y, z]
+                .astype(int)
+                .flatten(order="F")
+                .tolist(),
+                None,
+                None,
+                None,
+            )
+            representation.append(layer_representation)
+        return (max_x - min_x, max_y - min_y, max_z - min_z), representation
+
+    def update_voxels(self):
         # generate coordinates
         # Eg: if dimension size is 20, indices are [-10, ..., 9]
         # if dimension size if 21, indices are [-10, ..., 10]
@@ -657,8 +690,8 @@ class CPPNModel(BaseModel):
         # Outputs are List[array(coord_num,), array(coord_num,), array(coord_num,)]
         # first logit is used to control voxel presence
         # second logit is used to control voxel passiveness
-        # third logit is used to control phase (sin/cos)
-        outputs = [sigmoid(x) for x in self.cppn.eval(inputs)]
+        # third logit is used to control voxel phase
+        outputs = [sigmoid(inputs[0]), sigmoid(inputs[1]), sigmoid(inputs[2])]
 
         material = np.where(
             outputs[0] < 0.5,
@@ -678,6 +711,88 @@ class CPPNModel(BaseModel):
         self.occupied = self.voxels[:, :, :] != 0
         self.num_non_zero_voxel = np.sum(self.occupied.astype(int))
 
-    # @staticmethod
-    # def rescale(data: np.ndarray, rescale_range: Tuple[float, float]):
-    #     return data * (rescale_range[1] - rescale_range[0]) + rescale_range[0]
+
+class CPPNBinaryTreeWithPhaseOffsetModel(CPPNBaseModel):
+    def __init__(
+        self,
+        dimension_size=20,
+        cppn_intermediate_node_num: int = 20,
+        cppn_functions: OrderedDictType[str, Callable[[np.ndarray], np.ndarray]] = None,
+    ):
+        super().__init__(
+            ["presence?", "passive?", "phase_offset"],
+            dimension_size,
+            cppn_intermediate_node_num,
+            cppn_functions,
+        )
+
+    def get_robot(self):
+        x_occupied = [
+            x for x in range(self.occupied.shape[0]) if np.any(self.occupied[x])
+        ]
+        y_occupied = [
+            y for y in range(self.occupied.shape[1]) if np.any(self.occupied[:, y])
+        ]
+        z_occupied = [
+            z for z in range(self.occupied.shape[2]) if np.any(self.occupied[:, :, z])
+        ]
+        min_x = min(x_occupied)
+        max_x = max(x_occupied) + 1
+        min_y = min(y_occupied)
+        max_y = max(y_occupied) + 1
+        min_z = min(z_occupied)
+        max_z = max(z_occupied) + 1
+        representation = []
+
+        for z in range(min_z, max_z):
+            layer_representation = (
+                self.voxels[min_x:max_x, min_y:max_y, z, 0]
+                .astype(int)
+                .flatten(order="F")
+                .tolist(),
+                None,
+                None,
+                self.voxels[min_x:max_x, min_y:max_y, z, 1]
+                .astype(float)
+                .flatten(order="F")
+                .tolist(),
+            )
+            representation.append(layer_representation)
+        return (max_x - min_x, max_y - min_y, max_z - min_z), representation
+
+    def update_voxels(self):
+        # generate coordinates
+        # Eg: if dimension size is 20, indices are [-10, ..., 9]
+        # if dimension size if 21, indices are [-10, ..., 10]
+        indices = list(
+            range(
+                -self.center_voxel_offset,
+                self.dimension_size - self.center_voxel_offset,
+            )
+        )
+        coords = np.stack(np.meshgrid(indices, indices, indices, indexing="ij"))
+        coords = np.transpose(coords.reshape([coords.shape[0], -1]))
+        distances = np.linalg.norm(coords, axis=1)
+        # Inputs of shape (coord_num, 4), each row is x, y, z, d
+        # splitted by column
+        inputs = [coords[:, 0], coords[:, 1], coords[:, 2]] + [distances]
+
+        # Outputs are List[array(coord_num,), array(coord_num,), array(coord_num,)]
+        # first logit is used to control voxel presence
+        # second logit is used to control voxel passiveness
+        # third is phase offset output
+        outputs = [sigmoid(inputs[0]), sigmoid(inputs[1]), inputs[2]]
+
+        material = np.where(outputs[0] < 0.5, 0, np.where(outputs[1] < 0.5, 1, 2),)
+        self.voxels = np.zeros([self.dimension_size] * 3 + [2], dtype=float,)
+        self.voxels[
+            coords[:, 0] + self.center_voxel_offset,
+            coords[:, 1] + self.center_voxel_offset,
+            coords[:, 2] + self.center_voxel_offset,
+        ] = np.stack([material] + outputs[2], axis=1)
+        # print("outputs:")
+        # print(outputs)
+        # print("voxels:")
+        # print(self.voxels)
+        self.occupied = self.voxels[:, :, :, 0] != 0
+        self.num_non_zero_voxel = np.sum(self.occupied.astype(int))

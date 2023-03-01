@@ -11,7 +11,10 @@ from renesis.utils.voxcraft import vxd_creator, get_voxel_positions
 from renesis.utils.fitness import max_z, table, distance_traveled, has_fallen
 from renesis.utils.debug import enable_debugger
 from renesis.env_model.base import BaseModel
-from renesis.env_model.cppn import CPPNModel
+from renesis.env_model.cppn import (
+    CPPNBinaryTreeModel,
+    CPPNBinaryTreeWithPhaseOffsetModel,
+)
 from renesis.env_model.growth import GrowthModel
 
 
@@ -241,7 +244,7 @@ class VoxcraftGrowthEnvironment(VoxcraftBaseEnvironment):
         super().__init__(config, env_models)
 
 
-class VoxcraftCPPNEnvironment(VoxcraftBaseEnvironment):
+class VoxcraftCPPNBinaryTreeEnvironment(VoxcraftBaseEnvironment):
 
     metadata = {"render.modes": ["ansi"]}
 
@@ -249,7 +252,30 @@ class VoxcraftCPPNEnvironment(VoxcraftBaseEnvironment):
         if config.get("debug", False):
             enable_debugger(config["debug_ip"], config["debug_port"])
         env_models = [
-            CPPNModel(
+            CPPNBinaryTreeModel(
+                dimension_size=config["dimension_size"],
+                cppn_intermediate_node_num=config["cppn_intermediate_node_num"],
+            )
+            for _ in range(config["num_envs"])
+        ]
+        super().__init__(config, env_models)
+
+    # def get_rewards(self, all_finished):
+    #     base_rewards = super().get_rewards(all_finished)
+    #     for idx, model in enumerate(self.env_models):
+    #         base_rewards[idx] += model.get_cppn_reward()
+    #     return base_rewards
+
+
+class VoxcraftCPPNBinaryTreeWithPhaseOffsetEnvironment(VoxcraftBaseEnvironment):
+
+    metadata = {"render.modes": ["ansi"]}
+
+    def __init__(self, config):
+        if config.get("debug", False):
+            enable_debugger(config["debug_ip"], config["debug_port"])
+        env_models = [
+            CPPNBinaryTreeWithPhaseOffsetModel(
                 dimension_size=config["dimension_size"],
                 cppn_intermediate_node_num=config["cppn_intermediate_node_num"],
             )
