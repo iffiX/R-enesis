@@ -1,13 +1,12 @@
 import os
+import pickle
 import graphviz
 import gym.spaces
 import numpy as np
-import ray
 import torch as t
 from torch import nn
 from typing import List, Dict
 from gym.spaces import Dict as DictSpace
-from ray.tune import Callback
 from ray.tune.logger import LoggerCallback
 from ray.tune.result import TIMESTEPS_TOTAL, TRAINING_ITERATION
 from ray.rllib.models.torch.misc import (
@@ -241,23 +240,14 @@ class ActorDistribution(TorchDistributionWrapper):
         # source_node_masks shape: [batch_size, node_num]
         source_node_masks = t.cat(
             [
-                t.from_numpy(
-                    CPPN.get_source_node_mask(
-                        self.model.model_config["custom_model_config"][
-                            "cppn_input_node_num"
-                        ],
-                        self.model.model_config["custom_model_config"][
-                            "cppn_output_node_num"
-                        ],
-                        nr,
-                    )
-                )
-                .unsqueeze(0)
-                .bool()
+                t.from_numpy(CPPN.get_source_node_mask(nr)).unsqueeze(0).bool()
                 for nr in node_ranks.cpu().numpy()
             ]
         ).to(logits.device)
-        logits = t.masked_fill(logits, ~source_node_masks, -t.inf)
+
+        # Prevent ray initialization error
+        if not t.all(source_node_masks == False):
+            logits = t.masked_fill(logits, ~source_node_masks, -t.inf)
         dist = TorchCategorical(logits)
         return dist
 
@@ -283,24 +273,14 @@ class ActorDistribution(TorchDistributionWrapper):
         # target_node_masks shape: [batch_size, node_num]
         target_node_masks = t.cat(
             [
-                t.from_numpy(
-                    CPPN.get_target_node_mask(
-                        src,
-                        self.model.model_config["custom_model_config"][
-                            "cppn_input_node_num"
-                        ],
-                        self.model.model_config["custom_model_config"][
-                            "cppn_output_node_num"
-                        ],
-                        nr,
-                    )
-                )
-                .unsqueeze(0)
-                .bool()
+                t.from_numpy(CPPN.get_target_node_mask(src, nr)).unsqueeze(0).bool()
                 for src, nr in zip(source_node, node_ranks.cpu().numpy())
             ]
         ).to(logits.device)
-        logits = t.masked_fill(logits, ~target_node_masks, -t.inf)
+
+        # Prevent ray initialization error
+        if not t.all(target_node_masks == False):
+            logits = t.masked_fill(logits, ~target_node_masks, -t.inf)
         dist = TorchCategorical(logits)
         return dist
 
@@ -385,34 +365,40 @@ class Actor(TorchModelV2, nn.Module):
             head_num=model_config["custom_model_config"]["head_num"],
         )
 
+        output_feature_num = model_config["custom_model_config"]["output_feature_num"]
+        mlp_hidden_size = model_config["custom_model_config"]["mlp_hidden_size"]
+
         self.value_net = nn.Sequential(
             SlimFC(
-                model_config["custom_model_config"]["output_feature_num"],
-                256,
+                output_feature_num,
+                mlp_hidden_size,
+                initializer=normc_initializer(0.01),
+                activation_fn=nn.ReLU,
+            ),
+            Mean(),
+            SlimFC(
+                mlp_hidden_size,
+                1,
                 initializer=normc_initializer(0.01),
                 activation_fn=None,
             ),
-            Mean(),
-            SlimFC(256, 128, initializer=normc_initializer(0.01), activation_fn=None),
-            SlimFC(128, 1, initializer=normc_initializer(0.01), activation_fn=None),
         )
 
-        output_feature_num = model_config["custom_model_config"]["output_feature_num"]
         self.source_node_module = make_mlp(
-            (output_feature_num, 128, 1), squeeze_last=True
+            (output_feature_num, mlp_hidden_size, 1), squeeze_last=True
         )
         self.target_node_module = make_mlp(
-            (output_feature_num * 2, 128, 1), squeeze_last=True
+            (output_feature_num * 2, mlp_hidden_size, 1), squeeze_last=True,
         )
         self.target_function_module = make_mlp(
             (
                 output_feature_num * 2,
-                128,
+                mlp_hidden_size,
                 model_config["custom_model_config"]["target_function_num"],
             )
         )
-        self.has_edge_module = make_mlp((output_feature_num * 2, 128, 2))
-        self.weight_module = make_mlp((output_feature_num * 2, 128, 2))
+        self.has_edge_module = make_mlp((output_feature_num * 2, mlp_hidden_size, 2))
+        self.weight_module = make_mlp((output_feature_num * 2, mlp_hidden_size, 2))
         self._shared_base_output = None
         print_model_size(self)
 
@@ -467,29 +453,48 @@ class CustomCallbacks(DefaultCallbacks):
     def on_episode_end(self, *, worker, base_env, policies, episode, **kwargs):
         # Render the robot simulation
         env = base_env.vector_env  # type: VoxcraftGrowthEnvironment
-        episode.media["episode_data"]["robot"] = env.best_finished_robot
+        episode.media["episode_data"]["rewards"] = env.previous_rewards
+        episode.media["episode_data"]["best_reward"] = env.best_reward
+        episode.media["episode_data"]["best_robot"] = env.best_finished_robot
         episode.media["episode_data"][
-            "robot_sim_history"
+            "best_robot_sim_history"
         ] = env.best_finished_robot_sim_history
         episode.media["episode_data"][
-            "cppn_graphs"
+            "best_robot_cppn_graphs"
         ] = env.best_finished_robot_state_data
 
     def on_train_result(self, *, algorithm, result, trainer, **kwargs,) -> None:
-        num_episodes = result["episodes_this_iter"]
-        data = result["episode_media"].get("episode_data", [])
-        episode_data = data[-num_episodes:]
-
-        # Only preserve 1 result to reduce load on checkpointing
-        result["episode_media"] = {
-            "episode_data": episode_data[-1] if len(episode_data) > 0 else []
-        }
-
-        if "evaluation" in result:
-            result["evaluation"]["episode_media"] = {}
+        # Remove non-evaluation data
+        result["episode_media"] = {}
         if "sampler_results" in result:
             result["sampler_results"]["episode_media"] = {}
-        print("Cleaning completed")
+
+        if "evaluation" in result:
+            data = result["evaluation"]["episode_media"].get("episode_data", [])
+
+            if len(data) > 0:
+                # Aggregate results
+                rewards = []
+                best_reward = -np.inf
+                best_robot = None
+                best_robot_sim_history = None
+                best_robot_cppn_graphs = None
+                for episode_data in data:
+                    rewards += episode_data["rewards"]
+                    if episode_data["best_reward"] > best_reward:
+                        best_robot = episode_data["best_robot"]
+                        best_robot_sim_history = episode_data["best_robot_sim_history"]
+                        best_robot_cppn_graphs = episode_data["best_robot_cppn_graphs"]
+
+                result["evaluation"]["episode_media"] = {
+                    "episode_data": {
+                        "rewards": rewards,
+                        "best_reward": best_reward,
+                        "best_robot": best_robot,
+                        "best_robot_sim_history": best_robot_sim_history,
+                        "best_robot_cppn_graphs": best_robot_cppn_graphs,
+                    }
+                }
 
 
 class DataLoggerCallback(LoggerCallback):
@@ -499,59 +504,80 @@ class DataLoggerCallback(LoggerCallback):
 
     def log_trial_start(self, trial):
         trial.init_logdir()
-        self._trial_local_dir[trial] = os.path.join(trial.logdir, "episode_data")
+        self._trial_local_dir[trial] = os.path.join(trial.logdir, "data")
         os.makedirs(self._trial_local_dir[trial], exist_ok=True)
 
     def log_trial_result(self, iteration, trial, result):
-        step = result.get(TIMESTEPS_TOTAL) or result[TRAINING_ITERATION]
-        data = result["episode_media"].get("episode_data", [])
-        result["episode_media"] = {}
-        if data and data["cppn_graphs"] is not None:
-            print(f"Saving cppn graph")
-            unpruned_graph, pruned_graph = data["cppn_graphs"]
-            g1 = graphviz.Source(unpruned_graph)
-            g1.render(
-                filename=f"unpruned_{step:08d}",
-                directory=self._trial_local_dir[trial],
-                format="png",
-            )
-            g2 = graphviz.Source(pruned_graph)
-            g2.render(
-                filename=f"pruned_{step:08d}",
-                directory=self._trial_local_dir[trial],
-                format="png",
-            )
+        iteration = result[TRAINING_ITERATION]
+        if "evaluation" in result:
+            data = result["evaluation"]["episode_media"].get("episode_data", None)
+            result["evaluation"]["episode_media"] = {}
+            if data:
+                log_file = os.path.join(self._trial_local_dir[trial], "metric.data")
+                metrics = []
+                if os.path.exists(log_file):
+                    with open(log_file, "rb") as file:
+                        metrics = pickle.load(file)
+                with open(log_file, "wb") as file:
+                    history_best_reward = -np.inf
+                    for history_metric in metrics:
+                        if history_metric[0] > history_best_reward:
+                            history_best_reward = history_metric[0]
+                    metrics += [
+                        (
+                            max(history_best_reward, np.max(data["rewards"])),
+                            np.max(data["rewards"]),
+                            np.mean(data["rewards"]),
+                            np.min(data["rewards"]),
+                        )
+                    ]
+                    pickle.dump(metrics, file)
 
-            robot = data["robot"]
-            history = data["robot_sim_history"]
-            frames = render(history)
+                print(f"Saving cppn graph")
+                unpruned_graph, pruned_graph = data["best_robot_cppn_graphs"]
+                g1 = graphviz.Source(unpruned_graph)
+                g1.render(
+                    filename=f"unpruned_it_{iteration}",
+                    directory=self._trial_local_dir[trial],
+                    format="png",
+                )
+                g2 = graphviz.Source(pruned_graph)
+                g2.render(
+                    filename=f"pruned_it_{iteration}",
+                    directory=self._trial_local_dir[trial],
+                    format="png",
+                )
 
-            if frames is not None:
-                path = os.path.join(
-                    self._trial_local_dir[trial], f"rendered_{step:08d}.gif"
-                )
-                print(f"Saving rendered results to {path}")
-                wait = create_video_subproc(
-                    [f for f in frames],
-                    path=self._trial_local_dir[trial],
-                    filename=f"rendered_{step:08d}",
-                    extension=".gif",
-                )
-                path = os.path.join(
-                    self._trial_local_dir[trial], f"robot-{step:08d}.vxd"
-                )
-                with open(path, "w") as file:
-                    print(f"Saving robot to {path}")
-                    file.write(robot)
-                path = os.path.join(
-                    self._trial_local_dir[trial], f"run-{step:08d}.history"
-                )
-                with open(path, "w") as file:
-                    print(f"Saving history to {path}")
-                    file.write(history)
-                wait()
+                robot = data["best_robot"]
+                history = data["best_robot_sim_history"]
+                frames = render(history)
 
-        print("Saving completed")
+                if frames is not None:
+                    path = os.path.join(
+                        self._trial_local_dir[trial], f"rendered_it_{iteration}.gif"
+                    )
+                    print(f"Saving rendered results to {path}")
+                    wait = create_video_subproc(
+                        [f for f in frames],
+                        path=self._trial_local_dir[trial],
+                        filename=f"rendered_it_{iteration}",
+                        extension=".gif",
+                    )
+                    path = os.path.join(
+                        self._trial_local_dir[trial], f"robot_it_{iteration}.vxd"
+                    )
+                    with open(path, "w") as file:
+                        print(f"Saving robot to {path}")
+                        file.write(robot)
+                    path = os.path.join(
+                        self._trial_local_dir[trial], f"run_it_{iteration}.history"
+                    )
+                    with open(path, "w") as file:
+                        print(f"Saving history to {path}")
+                        file.write(history)
+                    wait()
+
+            print("Saving completed")
 
 
 ModelCatalog.register_custom_model("actor_model", Actor)

@@ -225,7 +225,6 @@ class GAT(nn.Module):
         activation: Callable[[t.Tensor], t.Tensor] = F.relu,
     ):
         """Dense version of GAT."""
-        assert layer_num > 2
         super(GAT, self).__init__()
         self.dropout_prob = dropout_prob
         self.layers = []

@@ -254,7 +254,7 @@ class VoxcraftCPPNBinaryTreeEnvironment(VoxcraftBaseEnvironment):
         env_models = [
             CPPNBinaryTreeModel(
                 dimension_size=config["dimension_size"],
-                cppn_intermediate_node_num=config["cppn_intermediate_node_num"],
+                cppn_hidden_node_num=config["cppn_hidden_node_num"],
             )
             for _ in range(config["num_envs"])
         ]
@@ -277,14 +277,8 @@ class VoxcraftCPPNBinaryTreeWithPhaseOffsetEnvironment(VoxcraftBaseEnvironment):
         env_models = [
             CPPNBinaryTreeWithPhaseOffsetModel(
                 dimension_size=config["dimension_size"],
-                cppn_intermediate_node_num=config["cppn_intermediate_node_num"],
+                cppn_hidden_node_num=config["cppn_hidden_node_num"],
             )
             for _ in range(config["num_envs"])
         ]
         super().__init__(config, env_models)
-
-    # def get_rewards(self, all_finished):
-    #     base_rewards = super().get_rewards(all_finished)
-    #     for idx, model in enumerate(self.env_models):
-    #         base_rewards[idx] += model.get_cppn_reward()
-    #     return base_rewards

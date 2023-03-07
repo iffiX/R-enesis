@@ -52,43 +52,48 @@ class CPPN:
         self,
         input_node_num: int,
         output_node_num: int,
-        intermediate_node_num: int,
+        hidden_node_num: int,
         functions: OrderedDictType[str, Callable[[List[np.ndarray]], np.ndarray]],
         output_aggregator: Callable[[List[np.ndarray]], np.ndarray] = lambda x: np.sum(
             x, axis=0
         ),
-        require_dependency: bool = True,
     ):
         """
         Create a compositional pattern producing network (CPPN) with
-        several input nodes, output nodes and intermediate nodes
+        several input nodes, output nodes and hidden nodes
 
         Args:
             input_node_num: Number of input nodes
             output_node_num: Number of output nodes
-            intermediate_node_num: Number of intermediate nodes
-            functions: A dictionary of functions where intermediate nodes can choose from
+            hidden_node_num: Number of hidden nodes
+            functions: A dictionary of functions where hidden nodes can choose from
             output_aggregator: Aggregator function for output nodes
-            require_dependency: Whether require dependency for source and target nodes.
         """
         for f in functions:
             if len(f) == 0:
                 raise ValueError("Empty function name is not allowed")
         self.input_node_num = input_node_num
         self.output_node_num = output_node_num
-        self.intermediate_node_num = intermediate_node_num
+        self.hidden_node_num = hidden_node_num
         self.functions = functions
         self.output_aggregator = output_aggregator
-        self.require_dependency = require_dependency
 
         self.nodes = []
         self.nodes += [InputNode() for _ in range(input_node_num)]
         self.nodes += [OutputNode() for _ in range(output_node_num)]
-        self.nodes += [None for _ in range(intermediate_node_num)]
+        self.nodes += [None for _ in range(hidden_node_num)]
+
+        # Init
+        # Input node always has a rank of 0, and can never be a target node
+        # Output node always has a rank of inf, and can never be a source node
+        # Hidden nodes have a initialized sequential rank
+        # If all edges with a input node/ an output node as a vertex are
+        # removed, the remaining graph of hidden nodes is a DAG, and with these
+        # edges added back, it is still a DAG.
         self.node_ranks = np.array(
             [0] * input_node_num
             + [np.inf] * output_node_num
-            + [-1] * intermediate_node_num
+            + list(range(1, hidden_node_num + 1))
         )
         self.in_edges = {
             i: set() for i in range(len(self.nodes))
@@ -111,7 +116,7 @@ class CPPN:
         return len(self.functions)
 
     def get_node_features(self):
-        # row wise: is_input_node, is_output_node, is_empty_intermediate_node, function one-hot encodings
+        # row wise: is_input_node, is_output_node, is_empty_hidden_node, function one-hot encodings
         features = np.zeros([len(self.nodes), 3 + len(self.functions)], dtype=float)
         features[list(range(self.input_node_num)), 0] = 1
         features[
@@ -128,12 +133,6 @@ class CPPN:
                 features[i, 3 + function_names.index(self.nodes[i])] = 1
         return features
 
-    def get_node_rans(self):
-        if self.require_dependency:
-            return self.node_ranks
-        else:
-            return np.full_like(self.node_ranks, -2)
-
     def get_edges_and_weights(self):
         edges_and_weights = np.zeros([len(self.edges_weights), 3], dtype=float)
         for idx, (edge, weight) in enumerate(self.edges_weights.items()):
@@ -141,30 +140,28 @@ class CPPN:
             edges_and_weights[idx, 2] = weight
         return edges_and_weights
 
+    def get_node_ranks(self):
+        return self.node_ranks
+
     @classmethod
-    def get_source_node_mask(
-        cls, input_node_num: int, output_node_num: int, node_ranks: np.ndarray
-    ):
+    def get_source_node_mask(cls, node_ranks: np.ndarray):
         """
         Returns:
             A mask of shape (node_num,) and values of {0, 1}.
             0 for not allowing creating/deleting the edge,
             1 for allowing editing.
         """
+        # When action dependency is required:
         # The mask is always 0 for output nodes
-        # The mask is 1 For input/intermediate nodes
-        # if node rank has been initialized
-        mask = (np.logical_or(node_ranks != -1, node_ranks == -2)).astype(float)
-        mask[input_node_num : input_node_num + output_node_num] = 0
+        # The mask is 1 For input/hidden nodes
+
+        mask = np.full_like(node_ranks, 1).astype(float)
+        mask[node_ranks == np.inf] = 0
         return mask
 
     @classmethod
     def get_target_node_mask(
-        cls,
-        source_node: int,
-        input_node_num: int,
-        output_node_num: int,
-        node_ranks: np.ndarray,
+        cls, source_node: int, node_ranks: np.ndarray,
     ):
         """
         Args:
@@ -175,18 +172,10 @@ class CPPN:
             0 for not allowing creating/deleting the edge,
             1 for allowing editing.
         """
-        # The mask is always 1 for output nodes
-        # Input nodes / Intermediate nodes
-        # cannot have a directed edge pointing to nodes with
-        # a rank equal/lower than itself,
-        # either the rank is higher or the rank is uninitialized (-1)
+        # The mask is always 1 for output nodes, and always 0 for input nodes
+        # For hidden nodes, rank must be either higher than source_node
 
-        # This way no cycle can ever be formed
-        mask = np.logical_or(
-            node_ranks > node_ranks[source_node],
-            np.logical_or(node_ranks == -1, node_ranks == -2),
-        ).astype(float)
-        mask[input_node_num : input_node_num + output_node_num] = 1
+        mask = node_ranks > node_ranks[source_node]
         return mask
 
     def step(
@@ -197,23 +186,14 @@ class CPPN:
         has_edge: int,
         weight: float,
     ):
-        get_mask_args = {
-            "input_node_num": self.input_node_num,
-            "output_node_num": self.output_node_num,
-            "node_ranks": self.node_ranks,
-        }
-        if self.require_dependency and (
-            self.get_source_node_mask(**get_mask_args)[source_node] != 1
-            or self.get_target_node_mask(source_node, **get_mask_args)[target_node] != 1
+        if (
+            self.get_source_node_mask(self.node_ranks)[source_node] != 1
+            or self.get_target_node_mask(source_node, self.node_ranks)[target_node] != 1
         ):
             raise ValueError("Invalid edge")
 
-        if self.require_dependency and self.node_ranks[target_node] == -1:
-            # Initialize target node rank if its -1
-            self.node_ranks[target_node] = self.node_ranks[source_node] + 1
-
         if target_node >= self.input_node_num + self.output_node_num:
-            # Only applies function name change if target node is an intermediate node
+            # Only applies function name change if target node is an hidden node
             self.nodes[target_node] = list(self.functions.keys())[target_node_function]
 
         if target_node not in self.out_edges[source_node]:
@@ -282,8 +262,8 @@ class CPPN:
                 None for default naming.
             output_names: A list of names corresponding to each output node.
                 None for default naming.
-            function_styles: A dictionary of intermediate node styles, corresponding
-                to the function each intermediate node has.
+            function_styles: A dictionary of hidden node styles, corresponding
+                to the function each hidden node has.
         Returns:
             Two graphs in graphviz representation.
             The first one is un-pruned graph with all edges,
@@ -291,7 +271,7 @@ class CPPN:
         """
         input_names = input_names or [f"in_{i}" for i in range(self.input_node_num)]
         output_names = output_names or [f"out_{i}" for i in range(self.output_node_num)]
-        intermediate_nodes = [
+        hidden_nodes = [
             n + f"_{i + self.input_node_num + self.output_node_num}"
             if n is not None
             else None
@@ -299,8 +279,8 @@ class CPPN:
                 self.nodes[self.input_node_num + self.output_node_num :]
             )
         ]
-        intermediate_node_styles = (
-            [None] * self.intermediate_node_num
+        hidden_node_styles = (
+            [None] * self.hidden_node_num
             if function_styles is None
             else [
                 function_styles[n] if n is not None else None
@@ -308,14 +288,14 @@ class CPPN:
             ]
         )
 
-        unpruned_node_names = input_names + output_names + intermediate_nodes
+        unpruned_node_names = input_names + output_names + hidden_nodes
         unpruned_graph = self.render_graph(
-            unpruned_node_names, self.edges_weights, intermediate_node_styles
+            unpruned_node_names, self.edges_weights, hidden_node_styles
         )
 
         node_mask = [True] * (self.input_node_num + self.output_node_num) + [
             False
-        ] * self.intermediate_node_num
+        ] * self.hidden_node_num
         self.recursive_find_dependent_nodes(
             list(
                 range(self.input_node_num, self.input_node_num + self.output_node_num)
@@ -326,7 +306,7 @@ class CPPN:
             n if m else None for n, m in zip(unpruned_node_names, node_mask)
         ]
         pruned_graph = self.render_graph(
-            pruned_node_names, self.edges_weights, intermediate_node_styles
+            pruned_node_names, self.edges_weights, hidden_node_styles
         )
         return unpruned_graph, pruned_graph
 
@@ -350,14 +330,14 @@ class CPPN:
         self,
         node_names: List[Union[str, None]],
         edges: DictType[Tuple[int, int], float],
-        intermediate_node_styles: List[Union[str, None]] = None,
+        hidden_node_styles: List[Union[str, None]] = None,
     ):
         """
         Args:
             node_names: Name for every node. If node is not appearing, use None for that node.
             edges: All edges. (Note that if the edge contains a node marked as None, it will
                 not be displayed.)
-            intermediate_node_styles: Optional style configuration for intermediate nodes
+            hidden_node_styles: Optional style configuration for hidden nodes
         Returns:
             Graphviz graph in string
         """
@@ -396,16 +376,12 @@ class CPPN:
         
         """
 
-        intermediate_node_styles = (
-            intermediate_node_styles or [None] * self.intermediate_node_num
-        )
+        hidden_node_styles = hidden_node_styles or [None] * self.hidden_node_num
 
-        intermediate_node_names = node_names[
-            self.input_node_num + self.output_node_num :
-        ]
+        hidden_node_names = node_names[self.input_node_num + self.output_node_num :]
 
-        # Add styles for intermediate nodes
-        for style in set(intermediate_node_styles):
+        # Add styles for hidden nodes
+        for style in set(hidden_node_styles):
             if style is None:
                 # default style
                 style_string = "shape=octagon,style=filled,color=lightgrey"
@@ -414,7 +390,7 @@ class CPPN:
 
             stylized_nodes = [
                 f'"{n}"'
-                for st, n in zip(intermediate_node_styles, intermediate_node_names)
+                for st, n in zip(hidden_node_styles, hidden_node_names)
                 if st == style and n is not None
             ]
             if stylized_nodes:
@@ -454,16 +430,14 @@ class CPPNBaseModel(BaseModel):
         self,
         cppn_output_node_tags: List[str],
         dimension_size=20,
-        cppn_intermediate_node_num: int = 20,
+        cppn_hidden_node_num: int = 20,
         cppn_functions: OrderedDictType[str, Callable[[np.ndarray], np.ndarray]] = None,
-        cppn_require_dependency: bool = True,
     ):
         super().__init__()
         self.dimension_size = dimension_size
         self.center_voxel_offset = self.dimension_size // 2
         self.cppn_output_node_tags = cppn_output_node_tags
-        self.cppn_intermediate_node_num = cppn_intermediate_node_num
-        self.cppn_require_dependency = cppn_require_dependency
+        self.cppn_hidden_node_num = cppn_hidden_node_num
 
         # input: x, y, z, d
         # output: presence, likelihood * material num, actuation features
@@ -472,9 +446,8 @@ class CPPNBaseModel(BaseModel):
         self.cppn = CPPN(
             4,
             len(self.cppn_output_node_tags),
-            self.cppn_intermediate_node_num,
+            self.cppn_hidden_node_num,
             functions=self.cppn_functions,
-            require_dependency=cppn_require_dependency,
         )
 
         self.voxels = None
@@ -545,9 +518,8 @@ class CPPNBaseModel(BaseModel):
         self.cppn = CPPN(
             4,
             len(self.cppn_output_node_tags),
-            self.cppn_intermediate_node_num,
+            self.cppn_hidden_node_num,
             functions=self.cppn_functions,
-            require_dependency=self.cppn_require_dependency,
         )
 
     def is_finished(self):
@@ -570,7 +542,7 @@ class CPPNBaseModel(BaseModel):
         # edges = self.cppn.get_edges_and_weights()
         result = OrderedDict(
             [
-                ("node_ranks", self.cppn.node_ranks.astype(np.float64)),
+                ("node_ranks", self.cppn.get_node_ranks().astype(np.float64)),
                 ("nodes", self.cppn.get_node_features().astype(np.float64)),
                 ("edges", self.cppn.get_edges_and_weights().astype(np.float64)),
             ]
@@ -601,11 +573,11 @@ class CPPNBaseModel(BaseModel):
     # def get_cppn_reward(self):
     #     """
     #     Every connected input/output node has +1 reward.
-    #     Every intermediate node not connected to an output node has -1 reward
+    #     Every hidden node not connected to an output node has -1 reward
     #     """
     #     node_mask = [True] * (self.cppn.input_node_num + self.cppn.output_node_num) + [
     #         False
-    #     ] * self.cppn.intermediate_node_num
+    #     ] * self.cppn.hidden_node_num
     #     self.cppn.recursive_find_dependent_nodes(
     #         list(
     #             range(
@@ -631,7 +603,7 @@ class CPPNBaseModel(BaseModel):
     #     ):
     #         if self.cppn.node_ranks[i] > 0 and not node_mask[i]:
     #             reward -= 1
-    #     # print(f"i/o + intermediate reward: {reward}")
+    #     # print(f"i/o + hidden reward: {reward}")
     #     # print(self.cppn.node_ranks)
     #     # print(node_mask)
     #     return reward
@@ -644,16 +616,14 @@ class CPPNBinaryTreeModel(CPPNBaseModel):
     def __init__(
         self,
         dimension_size=20,
-        cppn_intermediate_node_num: int = 20,
+        cppn_hidden_node_num: int = 20,
         cppn_functions: OrderedDictType[str, Callable[[np.ndarray], np.ndarray]] = None,
-        cppn_require_dependency: bool = True,
     ):
         super().__init__(
             ["presence?", "passive?", "phase?"],
             dimension_size=dimension_size,
-            cppn_intermediate_node_num=cppn_intermediate_node_num,
+            cppn_hidden_node_num=cppn_hidden_node_num,
             cppn_functions=cppn_functions,
-            cppn_require_dependency=cppn_require_dependency,
         )
 
     def get_robot(self):
@@ -708,7 +678,8 @@ class CPPNBinaryTreeModel(CPPNBaseModel):
         # first logit is used to control voxel presence
         # second logit is used to control voxel passiveness
         # third logit is used to control voxel phase
-        outputs = [sigmoid(inputs[0]), sigmoid(inputs[1]), sigmoid(inputs[2])]
+        outputs = self.cppn.eval(inputs)
+        outputs = [sigmoid(outputs[0]), sigmoid(outputs[1]), sigmoid(outputs[2])]
 
         material = np.where(
             outputs[0] < 0.5,
@@ -733,16 +704,14 @@ class CPPNBinaryTreeWithPhaseOffsetModel(CPPNBaseModel):
     def __init__(
         self,
         dimension_size=20,
-        cppn_intermediate_node_num: int = 20,
+        cppn_hidden_node_num: int = 20,
         cppn_functions: OrderedDictType[str, Callable[[np.ndarray], np.ndarray]] = None,
-        cppn_require_dependency: bool = True,
     ):
         super().__init__(
             ["presence?", "passive?", "phase_offset"],
             dimension_size=dimension_size,
-            cppn_intermediate_node_num=cppn_intermediate_node_num,
+            cppn_hidden_node_num=cppn_hidden_node_num,
             cppn_functions=cppn_functions,
-            cppn_require_dependency=cppn_require_dependency,
         )
 
     def get_robot(self):
@@ -800,7 +769,8 @@ class CPPNBinaryTreeWithPhaseOffsetModel(CPPNBaseModel):
         # first logit is used to control voxel presence
         # second logit is used to control voxel passiveness
         # third is phase offset output
-        outputs = [sigmoid(inputs[0]), sigmoid(inputs[1]), inputs[2]]
+        outputs = self.cppn.eval(inputs)
+        outputs = [sigmoid(outputs[0]), sigmoid(outputs[1]), outputs[2]]
 
         material = np.where(outputs[0] < 0.5, 0, np.where(outputs[1] < 0.5, 1, 2),)
         self.voxels = np.zeros([self.dimension_size] * 3 + [2], dtype=float,)
