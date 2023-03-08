@@ -366,39 +366,29 @@ class Actor(TorchModelV2, nn.Module):
         )
 
         output_feature_num = model_config["custom_model_config"]["output_feature_num"]
-        mlp_hidden_size = model_config["custom_model_config"]["mlp_hidden_size"]
 
         self.value_net = nn.Sequential(
-            SlimFC(
-                output_feature_num,
-                mlp_hidden_size,
-                initializer=normc_initializer(0.01),
-                activation_fn=nn.ReLU,
-            ),
             Mean(),
             SlimFC(
-                mlp_hidden_size,
+                output_feature_num,
                 1,
                 initializer=normc_initializer(0.01),
                 activation_fn=None,
             ),
         )
 
-        self.source_node_module = make_mlp(
-            (output_feature_num, mlp_hidden_size, 1), squeeze_last=True
-        )
+        self.source_node_module = make_mlp((output_feature_num, 1), squeeze_last=True)
         self.target_node_module = make_mlp(
-            (output_feature_num * 2, mlp_hidden_size, 1), squeeze_last=True,
+            (output_feature_num * 2, 1), squeeze_last=True,
         )
         self.target_function_module = make_mlp(
             (
                 output_feature_num * 2,
-                mlp_hidden_size,
                 model_config["custom_model_config"]["target_function_num"],
             )
         )
-        self.has_edge_module = make_mlp((output_feature_num * 2, mlp_hidden_size, 2))
-        self.weight_module = make_mlp((output_feature_num * 2, mlp_hidden_size, 2))
+        self.has_edge_module = make_mlp((output_feature_num * 2, 2))
+        self.weight_module = make_mlp((output_feature_num * 2, 2))
         self._shared_base_output = None
         print_model_size(self)
 
@@ -451,9 +441,8 @@ class CustomCallbacks(DefaultCallbacks):
         episode.media["episode_data"] = {}
 
     def on_episode_end(self, *, worker, base_env, policies, episode, **kwargs):
-        # Render the robot simulation
         env = base_env.vector_env  # type: VoxcraftGrowthEnvironment
-        episode.media["episode_data"]["rewards"] = env.previous_rewards
+        episode.media["episode_data"]["rewards"] = env.all_rewards_history
         episode.media["episode_data"]["best_reward"] = env.best_reward
         episode.media["episode_data"]["best_robot"] = env.best_finished_robot
         episode.media["episode_data"][
@@ -482,6 +471,7 @@ class CustomCallbacks(DefaultCallbacks):
                 for episode_data in data:
                     rewards += episode_data["rewards"]
                     if episode_data["best_reward"] > best_reward:
+                        best_reward = episode_data["best_reward"]
                         best_robot = episode_data["best_robot"]
                         best_robot_sim_history = episode_data["best_robot_sim_history"]
                         best_robot_cppn_graphs = episode_data["best_robot_cppn_graphs"]

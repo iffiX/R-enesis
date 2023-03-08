@@ -39,6 +39,7 @@ class VoxcraftBaseEnvironment(VectorEnv):
         self.robot_sim_histories = ["" for _ in range(config["num_envs"])]
         self.state_data = [None for _ in range(config["num_envs"])]
 
+        self.all_rewards_history = []
         self.best_reward = -np.inf
         self.best_finished_robot = "\n"
         self.best_finished_robot_sim_history = ""
@@ -102,8 +103,12 @@ class VoxcraftBaseEnvironment(VectorEnv):
             reward - previous_reward
             for reward, previous_reward in zip(rewards, self.previous_rewards)
         ]
-        # print(f"Reward diffs: {reward_diffs}")
         self.previous_rewards = rewards
+
+        self.all_rewards_history.append(rewards)
+        if len(self.all_rewards_history) > self.max_steps:
+            self.all_rewards_history = self.all_rewards_history[-self.max_steps :]
+        # print(f"Rewards: {self.previous_rewards}")
         # print(f"Finished: {self.check_finished()}")
         return (
             [model.observe() for model in self.env_models],

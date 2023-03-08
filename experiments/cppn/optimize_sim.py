@@ -37,7 +37,8 @@ config = {
     },
     "sgd_minibatch_size": 32,  # vector_env_num_per_worker * 2,
     "train_batch_size": 640,  # 40 * vector_env_num_per_worker * 2,
-    "rollout_fragment_length": 40,
+    "lr": 1e-3,
+    "rollout_fragment_length": 5,
     "vf_clip_param": 10 ** 5,
     "seed": np.random.randint(10 ** 5),
     # "num_workers": 2,
@@ -57,7 +58,7 @@ config = {
     "evaluation_duration": 2,
     "evaluation_num_workers": 1,
     # Only for evaluation runs, render the env.
-    "evaluation_config": {"render_env": False,},
+    "evaluation_config": {"render_env": False, "explore": True},
     # "monitor": True,
     "model": {
         "custom_action_dist": "actor_dist",
@@ -65,11 +66,10 @@ config = {
         "custom_model_config": {
             "debug": False,
             "input_feature_num": 3 + len(CPPNBaseModel.DEFAULT_CPPN_FUNCTIONS),
-            "hidden_feature_num": 64,
-            "output_feature_num": 64,
-            "layer_num": 2,
+            "hidden_feature_num": 32,
+            "output_feature_num": 32,
+            "layer_num": 3,
             "head_num": 2,
-            "mlp_hidden_size": 64,
             "cppn_input_node_num": 4,
             "cppn_output_node_num": 3,
             "target_function_num": len(CPPNBaseModel.DEFAULT_CPPN_FUNCTIONS),
