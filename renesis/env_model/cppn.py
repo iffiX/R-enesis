@@ -1,3 +1,4 @@
+import cc3d
 import numpy as np
 from collections import OrderedDict
 from typing import (
@@ -37,6 +38,11 @@ def wrap_with_aggregator(
     aggregator: Callable[[List[np.ndarray]], np.ndarray] = lambda x: np.mean(x, axis=0),
 ):
     return lambda x: func(aggregator(x))
+
+
+def is_voxel_continuous(occupied: np.ndarray):
+    _labels, label_num = cc3d.connected_components(occupied, 6, return_N=True)
+    return label_num <= 1
 
 
 class InputNode:
@@ -697,7 +703,13 @@ class CPPNBinaryTreeModel(CPPNBaseModel):
         # print("voxels:")
         # print(self.voxels)
         self.occupied = self.voxels[:, :, :] != 0
-        self.num_non_zero_voxel = np.sum(self.occupied.astype(int))
+
+        if is_voxel_continuous(self.occupied):
+            self.num_non_zero_voxel = np.sum(self.occupied.astype(int))
+        else:
+            self.voxels = np.zeros_like(self.voxels)
+            self.occupied = np.zeros_like(self.occupied)
+            self.num_non_zero_voxel = 0
 
 
 class CPPNBinaryTreeWithPhaseOffsetModel(CPPNBaseModel):
@@ -778,10 +790,16 @@ class CPPNBinaryTreeWithPhaseOffsetModel(CPPNBaseModel):
             coords[:, 0] + self.center_voxel_offset,
             coords[:, 1] + self.center_voxel_offset,
             coords[:, 2] + self.center_voxel_offset,
-        ] = np.stack([material] + outputs[2], axis=1)
+        ] = np.stack([material, outputs[2]], axis=1)
         # print("outputs:")
         # print(outputs)
         # print("voxels:")
         # print(self.voxels)
         self.occupied = self.voxels[:, :, :, 0] != 0
-        self.num_non_zero_voxel = np.sum(self.occupied.astype(int))
+
+        if is_voxel_continuous(self.occupied):
+            self.num_non_zero_voxel = np.sum(self.occupied.astype(int))
+        else:
+            self.voxels = np.zeros_like(self.voxels)
+            self.occupied = np.zeros_like(self.occupied)
+            self.num_non_zero_voxel = 0

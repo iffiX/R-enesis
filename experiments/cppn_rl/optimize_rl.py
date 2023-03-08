@@ -7,7 +7,7 @@ from ray.tune.logger import TBXLoggerCallback
 from ray.rllib.agents.ppo import PPOTrainer
 from renesis.env_model.cppn import CPPNBaseModel
 from renesis.env.voxcraft import VoxcraftCPPNBinaryTreeEnvironment
-from experiments.cppn.utils import CustomCallbacks, DataLoggerCallback
+from experiments.cppn_rl.utils import CustomCallbacks, DataLoggerCallback
 
 from renesis.utils.debug import enable_debugger
 
@@ -33,10 +33,11 @@ config = {
         ),
         "voxel_size": 0.01,
         "fallen_threshold": 0.25,
-        "num_envs": 16,  # vector_env_num_per_worker,
+        "num_envs": 128,  # vector_env_num_per_worker,
     },
-    "sgd_minibatch_size": 32,  # vector_env_num_per_worker * 2,
-    "train_batch_size": 640,  # 40 * vector_env_num_per_worker * 2,
+    "sgd_minibatch_size": 128,  # vector_env_num_per_worker * 2,
+    "num_sgd_iter": 15,
+    "train_batch_size": 2560,  # 40 * vector_env_num_per_worker * 2,
     "lr": 1e-3,
     "rollout_fragment_length": 5,
     "vf_clip_param": 10 ** 5,
