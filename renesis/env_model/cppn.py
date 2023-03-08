@@ -41,7 +41,9 @@ def wrap_with_aggregator(
 
 
 def is_voxel_continuous(occupied: np.ndarray):
-    _labels, label_num = cc3d.connected_components(occupied, 6, return_N=True)
+    _labels, label_num = cc3d.connected_components(
+        occupied, 6, return_N=True, out_dtype=np.uint64
+    )
     return label_num <= 1
 
 
