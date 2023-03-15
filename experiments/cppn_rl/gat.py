@@ -34,7 +34,7 @@ class GraphAttentionLayer(nn.Module):
         self,
         input_feature_num: int,
         output_feature_num: int,
-        dropout_prob: float = 0.5,
+        dropout_prob: float = 0.1,
         lrelu_alpha: float = 1e-2,
         identity: bool = False,
         activation: Callable[[t.Tensor], t.Tensor] = F.relu,
@@ -115,7 +115,10 @@ class GraphAttentionLayer(nn.Module):
         att1 = self.leakyrelu(F.linear(a_input, self.a))
 
         att2 = self.indexed_softmax(N, att1, edge, edge_num)
-        att3 = F.dropout(att2, self.dropout_prob, training=self.training)
+        if self.dropout_prob > 0:
+            att3 = F.dropout(att2, self.dropout_prob, training=self.training)
+        else:
+            att3 = att2
         h_prime = self.indexed_multiply_and_gather(att3, Wh, edge, edge_num)
 
         return self.activation(h_prime)
@@ -183,7 +186,7 @@ class MultiHeadGraphAttentionLayer(nn.Module):
         input_feature_num: int,
         output_feature_num: int,
         head_num: int,
-        dropout_prob: float = 0.5,
+        dropout_prob: float = 0.1,
         lrelu_alpha: float = 1e-2,
         identity: bool = False,
         activation: Callable[[t.Tensor], t.Tensor] = F.relu,

@@ -108,6 +108,7 @@ class VoxcraftBaseEnvironment(VectorEnv):
         self.all_rewards_history.append(rewards)
         if len(self.all_rewards_history) > self.max_steps:
             self.all_rewards_history = self.all_rewards_history[-self.max_steps :]
+        # print(f"Actions: \n {actions}")
         # print(f"Rewards: {self.previous_rewards}")
         # print(f"Finished: {self.check_finished()}")
         return (

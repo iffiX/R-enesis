@@ -6,8 +6,8 @@ from ray import tune
 from ray.tune.logger import TBXLoggerCallback
 from ray.rllib.agents.ppo import PPOTrainer
 from renesis.env_model.cppn import CPPNBaseModel
-from renesis.env.voxcraft import VoxcraftCPPNBinaryTreeEnvironment
-from experiments.cppn_rl.utils import CustomCallbacks, DataLoggerCallback
+from renesis.env.voxcraft import VoxcraftCPPNBinaryTreeWithPhaseOffsetEnvironment
+from experiments.cppn_rl.utils import ActorSampling, CustomCallbacks, DataLoggerCallback
 
 from renesis.utils.debug import enable_debugger
 
@@ -21,7 +21,7 @@ ray.init(_memory=1 * (10 ** 9), object_store_memory=10 ** 9)
 
 # vector_env_num_per_worker = 5
 config = {
-    "env": VoxcraftCPPNBinaryTreeEnvironment,
+    "env": VoxcraftCPPNBinaryTreeWithPhaseOffsetEnvironment,
     "env_config": {
         "debug": False,
         "dimension_size": 6,
@@ -37,8 +37,8 @@ config = {
     },
     "sgd_minibatch_size": 128,  # vector_env_num_per_worker * 2,
     "num_sgd_iter": 15,
-    "train_batch_size": 2560,  # 40 * vector_env_num_per_worker * 2,
-    "lr": 1e-3,
+    "train_batch_size": 5120,  # 40 * vector_env_num_per_worker * 2,
+    "lr": 1e-4,
     "rollout_fragment_length": 5,
     "vf_clip_param": 10 ** 5,
     "seed": np.random.randint(10 ** 5),
@@ -66,18 +66,25 @@ config = {
         "custom_model": "actor_model",
         "custom_model_config": {
             "debug": False,
-            "input_feature_num": 3 + len(CPPNBaseModel.DEFAULT_CPPN_FUNCTIONS),
-            "hidden_feature_num": 32,
-            "output_feature_num": 32,
+            "input_feature_num": 4 + len(CPPNBaseModel.DEFAULT_CPPN_FUNCTIONS),
+            "hidden_feature_num": 64,
+            "output_feature_num": 64,
             "layer_num": 3,
             "head_num": 2,
             "cppn_input_node_num": 4,
             "cppn_output_node_num": 3,
             "target_function_num": len(CPPNBaseModel.DEFAULT_CPPN_FUNCTIONS),
+            "initial_temperature": 5,
+            "exploration_timesteps": -1,
         },
     },
+    "exploration_config": {"type": ActorSampling},
     "callbacks": CustomCallbacks,
 }
+
+config["model"]["custom_model_config"]["exploration_timesteps"] = (
+    config["train_batch_size"] * 3
+)
 
 
 class DebugPPOTrainer(PPOTrainer):

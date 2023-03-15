@@ -42,7 +42,7 @@ def wrap_with_aggregator(
 
 def is_voxel_continuous(occupied: np.ndarray):
     _labels, label_num = cc3d.connected_components(
-        occupied, 6, return_N=True, out_dtype=np.uint64
+        occupied, connectivity=6, return_N=True, out_dtype=np.uint64
     )
     return label_num <= 1
 
@@ -124,21 +124,26 @@ class CPPN:
         return len(self.functions)
 
     def get_node_features(self):
-        # row wise: is_input_node, is_output_node, is_empty_hidden_node, function one-hot encodings
-        features = np.zeros([len(self.nodes), 3 + len(self.functions)], dtype=float)
-        features[list(range(self.input_node_num)), 0] = 1
+        # row wise:
+        # relative_index,
+        # is_input_node, is_output_node, is_empty_hidden_node, function one-hot encodings
+        features = np.zeros([len(self.nodes), 4 + len(self.functions)], dtype=float)
+        features[: self.input_node_num, 0] = list(range(self.input_node_num))
         features[
-            list(
-                range(self.input_node_num, self.input_node_num + self.output_node_num)
-            ),
-            1,
+            self.input_node_num : self.input_node_num + self.output_node_num, 0
+        ] = list(range(self.output_node_num))
+        features[-self.hidden_node_num :, 0] = list(range(self.hidden_node_num))
+
+        features[: self.input_node_num, 1] = 1
+        features[
+            self.input_node_num : self.input_node_num + self.output_node_num, 2,
         ] = 1
         function_names = list(self.functions.keys())
         for i in range(self.input_node_num + self.output_node_num, len(self.nodes)):
             if self.nodes[i] is None:
-                features[i, 2] = 1
+                features[i, 3] = 1
             else:
-                features[i, 3 + function_names.index(self.nodes[i])] = 1
+                features[i, 4 + function_names.index(self.nodes[i])] = 1
         return features
 
     def get_edges_and_weights(self):
@@ -254,9 +259,12 @@ class CPPN:
             return np.zeros(inputs[0].shape)
         else:
             if isinstance(self.nodes[root_node], OutputNode):
-                return self.output_aggregator(source_inputs)
+                output = self.output_aggregator(source_inputs)
             else:
-                return self.functions[self.nodes[root_node]](source_inputs)
+                output = self.functions[self.nodes[root_node]](source_inputs)
+            return np.clip(
+                np.nan_to_num(output, nan=0, posinf=1e4, neginf=-1e4), -1e4, 1e4
+            )
 
     def get_graphs(
         self,
@@ -500,8 +508,8 @@ class CPPNBaseModel(BaseModel):
                         "nodes",
                         Box(
                             low=0,
-                            high=1,
-                            shape=(self.cppn.node_num, (3 + len(self.cppn_functions))),
+                            high=np.inf,
+                            shape=(self.cppn.node_num, (4 + len(self.cppn_functions))),
                             dtype=np.float64,
                         ),
                     ),

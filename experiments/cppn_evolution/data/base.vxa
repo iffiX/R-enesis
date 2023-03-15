@@ -25,8 +25,7 @@
 	<Environment>
         <Thermal>
             <TempEnabled>1</TempEnabled>
-            <TempAmplitude>20</TempAmplitude>
-            <TempBase>25</TempBase>
+            <TempAmplitude>5</TempAmplitude>
             <VaryTempEnabled>1</VaryTempEnabled>
             <TempPeriod>.25</TempPeriod>
         </Thermal>

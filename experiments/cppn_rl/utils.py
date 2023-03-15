@@ -2,6 +2,7 @@ import os
 import pickle
 import graphviz
 import gym.spaces
+import math as m
 import numpy as np
 import torch as t
 from torch import nn
@@ -20,6 +21,7 @@ from ray.rllib.models.torch.torch_action_dist import (
     TorchDiagGaussian,
     TorchDistributionWrapper,
 )
+from ray.rllib.utils.exploration.stochastic_sampling import StochasticSampling
 from ray.rllib.algorithms.callbacks import DefaultCallbacks
 from ray.rllib.utils.annotations import override
 from ray.rllib.utils.typing import ModelConfigDict, TensorType
@@ -30,6 +32,9 @@ from renesis.utils.sys_debug import print_model_size
 from renesis.utils.media import create_video_subproc
 from renesis.sim import VXHistoryRenderer
 from .gat import GAT, add_reflexive_edges
+from ray.rllib.utils.torch_utils import FLOAT_MIN
+
+t.set_printoptions(threshold=10000)
 
 
 def render(history):
@@ -80,6 +85,17 @@ def safe_kl_for_categorical(cate1: TorchCategorical, cate2: TorchCategorical):
     return kl.sum(dim=1)
 
 
+def compute_temperature(initial_temperature, timestep, exploration_timesteps):
+    return max(
+        1,
+        initial_temperature
+        * (
+            0.99
+            ** (timestep * m.log(1 / initial_temperature, 0.99) / exploration_timesteps)
+        ),
+    )
+
+
 class Squeeze(nn.Module):
     def forward(self, x):
         return x.squeeze(-1)
@@ -88,6 +104,31 @@ class Squeeze(nn.Module):
 class Mean(nn.Module):
     def forward(self, x):
         return t.mean(x, dim=1)
+
+
+class ActorSampling(StochasticSampling):
+    def _get_tf_exploration_action_op(self, action_dist, timestep, explore):
+        raise NotImplementedError("Not implemented for Tensorflow")
+
+    def _get_torch_exploration_action(
+        self, action_dist, timestep, explore,
+    ):
+        # Set last timestep or (if not given) increase by one.
+        self.last_timestep = (
+            timestep if timestep is not None else self.last_timestep + 1
+        )
+
+        # Apply exploration.
+        if explore:
+            action = action_dist.sample(timestep=float(self.last_timestep))
+            logp = action_dist.sampled_action_logp()
+
+        # No exploration -> Return deterministic actions.
+        else:
+            action = action_dist.deterministic_sample()
+            logp = t.zeros_like(action_dist.sampled_action_logp())
+
+        return action, logp
 
 
 class ActorDistribution(TorchDistributionWrapper):
@@ -138,14 +179,18 @@ class ActorDistribution(TorchDistributionWrapper):
         return t.stack((src_node, tar_node, tar_func, has_edge, weight), dim=1)
 
     @override(TorchDistributionWrapper)
-    def sample(self):
-        src_dist = self.source_node_distribution()
+    def sample(self, timestep=None):
+        src_dist = self.source_node_distribution(timestep=timestep)
         src_node = src_dist.sample()
-        tar_dist = self.target_node_distribution(src_node)
+        tar_dist = self.target_node_distribution(src_node, timestep=timestep)
         tar_node = tar_dist.sample()
-        tar_func_dist = self.target_function_distribution(src_node, tar_node)
+        tar_func_dist = self.target_function_distribution(
+            src_node, tar_node, timestep=timestep
+        )
         tar_func = tar_func_dist.sample()
-        has_edge_dist = self.has_edge_distribution(src_node, tar_node)
+        has_edge_dist = self.has_edge_distribution(
+            src_node, tar_node, timestep=timestep
+        )
         has_edge = has_edge_dist.sample()
         weight_dist = self.weight_distribution(src_node, tar_node)
         weight = weight_dist.sample().squeeze(-1)
@@ -231,7 +276,7 @@ class ActorDistribution(TorchDistributionWrapper):
 
         return src_terms + tar_terms + tar_func_terms + has_edge_terms + weight_terms
 
-    def source_node_distribution(self):
+    def source_node_distribution(self, timestep=None):
         # inputs shape: [batch_size, node_num, output_feature_num]
         # logits shape: [batch_size, node_num]
         logits = self.model.source_node_module(self.inputs[:, :, 1:])
@@ -247,11 +292,22 @@ class ActorDistribution(TorchDistributionWrapper):
 
         # Prevent ray initialization error
         if not t.all(source_node_masks == False):
-            logits = t.masked_fill(logits, ~source_node_masks, -t.inf)
-        dist = TorchCategorical(logits)
+            logits = logits + t.clamp(t.log(source_node_masks), min=FLOAT_MIN)
+            # logits = t.masked_fill(logits, ~source_node_masks, -t.inf)
+
+        if timestep is not None:
+            temperature = compute_temperature(
+                self.model.model_config["custom_model_config"]["initial_temperature"],
+                timestep,
+                self.model.model_config["custom_model_config"]["exploration_timesteps"],
+            )
+        else:
+            temperature = 1.0
+        # print(f"Logits: {logits}, temp: {temperature}")
+        dist = TorchCategorical(logits, temperature=temperature)
         return dist
 
-    def target_node_distribution(self, source_node):
+    def target_node_distribution(self, source_node, timestep=None):
         # src_node_embedding shape: [batch_size, 1, output_feature_num]
         batch_size = self.inputs.shape[0]
         node_num = self.inputs.shape[1]
@@ -280,11 +336,22 @@ class ActorDistribution(TorchDistributionWrapper):
 
         # Prevent ray initialization error
         if not t.all(target_node_masks == False):
-            logits = t.masked_fill(logits, ~target_node_masks, -t.inf)
-        dist = TorchCategorical(logits)
+            logits = logits + t.clamp(t.log(target_node_masks), min=FLOAT_MIN)
+            # logits = t.masked_fill(logits, ~target_node_masks, -t.inf)
+
+        if timestep is not None:
+            temperature = compute_temperature(
+                self.model.model_config["custom_model_config"]["initial_temperature"],
+                timestep,
+                self.model.model_config["custom_model_config"]["exploration_timesteps"],
+            )
+        else:
+            temperature = 1.0
+
+        dist = TorchCategorical(logits, temperature=temperature)
         return dist
 
-    def target_function_distribution(self, source_node, target_node):
+    def target_function_distribution(self, source_node, target_node, timestep=None):
         # tar_node_embedding shape: [batch_size, output_feature_num]
         batch_size = self.inputs.shape[0]
         src_node_embedding = self.inputs[:, :, 1:][range(batch_size), source_node]
@@ -295,10 +362,19 @@ class ActorDistribution(TorchDistributionWrapper):
             t.cat((src_node_embedding, tar_node_embedding), dim=1)
         )
 
-        dist = TorchCategorical(logits)
+        if timestep is not None:
+            temperature = compute_temperature(
+                self.model.model_config["custom_model_config"]["initial_temperature"],
+                timestep,
+                self.model.model_config["custom_model_config"]["exploration_timesteps"],
+            )
+        else:
+            temperature = 1.0
+
+        dist = TorchCategorical(logits, temperature=temperature)
         return dist
 
-    def has_edge_distribution(self, source_node, target_node):
+    def has_edge_distribution(self, source_node, target_node, timestep=None):
         batch_size = self.inputs.shape[0]
 
         # src_node_embedding and tar_node_embedding shape:
@@ -312,7 +388,16 @@ class ActorDistribution(TorchDistributionWrapper):
             t.cat((src_node_embedding, tar_node_embedding), dim=1)
         )
 
-        dist = TorchCategorical(logits)
+        if timestep is not None:
+            temperature = compute_temperature(
+                self.model.model_config["custom_model_config"]["initial_temperature"],
+                timestep,
+                self.model.model_config["custom_model_config"]["exploration_timesteps"],
+            )
+        else:
+            temperature = 1.0
+
+        dist = TorchCategorical(logits, temperature=temperature)
         return dist
 
     def weight_distribution(self, source_node, target_node):
@@ -363,6 +448,7 @@ class Actor(TorchModelV2, nn.Module):
             ],
             layer_num=model_config["custom_model_config"]["layer_num"],
             head_num=model_config["custom_model_config"]["head_num"],
+            dropout_prob=0,
         )
 
         output_feature_num = model_config["custom_model_config"]["output_feature_num"]
