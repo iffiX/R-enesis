@@ -65,7 +65,14 @@ class CustomCallbacks(DefaultCallbacks):
         episode.media["episode_data"] = {}
 
     def on_episode_end(
-        self, *, worker, base_env, policies, episode, env_index, **kwargs,
+        self,
+        *,
+        worker,
+        base_env,
+        policies,
+        episode,
+        env_index,
+        **kwargs,
     ):
         # Check if there are multiple episodes in a batch, i.e.
         # "batch_mode": "truncate_episodes".
@@ -82,7 +89,14 @@ class CustomCallbacks(DefaultCallbacks):
         episode.media["episode_data"]["reward"] = env.get_reward()
         episode.media["episode_data"]["voxels"] = env.env_model.voxels
 
-    def on_train_result(self, *, algorithm, result, trainer, **kwargs,) -> None:
+    def on_train_result(
+        self,
+        *,
+        algorithm,
+        result,
+        trainer,
+        **kwargs,
+    ) -> None:
         # Remove non-evaluation data
         result["episode_media"] = {}
         if "sampler_results" in result:
@@ -112,11 +126,12 @@ class CustomCallbacks(DefaultCallbacks):
 
 
 class DataLoggerCallback(LoggerCallback):
-    def __init__(self, reference_shape, dimension_size):
+    def __init__(self, reference_shape, dimension_size, render=True):
         self._trial_continue = {}
         self._trial_local_dir = {}
         self.reference_shape = reference_shape
         self.dimension_size = dimension_size
+        self.render = render
 
     def log_trial_start(self, trial):
         trial.init_logdir()
@@ -149,28 +164,53 @@ class DataLoggerCallback(LoggerCallback):
                     ]
                     pickle.dump(metrics, file)
 
-                pv.global_theme.window_size = [1536, 768]
-                plotter = Plotter()
-                img = plotter.plot_voxel(
-                    data["best_voxels"], distance=3 * self.dimension_size
-                )
-                Image.fromarray(img, mode="RGB").save(
-                    os.path.join(
-                        self._trial_local_dir[trial],
-                        f"generated_it_{iteration}_rew_{data['best_reward']}.png",
+                if self.render:
+                    pv.global_theme.window_size = [1536, 768]
+                    plotter = Plotter()
+                    img = plotter.plot_voxel(
+                        data["best_voxels"], distance=3 * self.dimension_size
                     )
-                )
+                    Image.fromarray(img, mode="RGB").save(
+                        os.path.join(
+                            self._trial_local_dir[trial],
+                            f"generated_it_{iteration}_rew_{data['best_reward']}.png",
+                        )
+                    )
 
-                img = plotter.plot_voxel_error(
-                    self.reference_shape,
-                    data["best_voxels"],
-                    distance=3 * self.dimension_size,
-                )
-                Image.fromarray(img, mode="RGB").save(
-                    os.path.join(
-                        self._trial_local_dir[trial], f"error_it_{iteration}.png"
+                    img = plotter.plot_voxel_error(
+                        self.reference_shape,
+                        data["best_voxels"],
+                        distance=3 * self.dimension_size,
                     )
-                )
+                    Image.fromarray(img, mode="RGB").save(
+                        os.path.join(
+                            self._trial_local_dir[trial], f"error_it_{iteration}.png"
+                        )
+                    )
+                else:
+                    with open(
+                        os.path.join(
+                            self._trial_local_dir[trial],
+                            f"generated_data_it_{iteration}_rew_{data['best_reward']}.data",
+                        ),
+                        "wb",
+                    ) as file:
+                        pickle.dump(
+                            (
+                                self.reference_shape,
+                                data["best_voxels"],
+                                self.dimension_size,
+                                os.path.join(
+                                    self._trial_local_dir[trial],
+                                    f"generated_it_{iteration}_rew_{data['best_reward']}.png",
+                                ),
+                                os.path.join(
+                                    self._trial_local_dir[trial],
+                                    f"error_it_{iteration}.png",
+                                ),
+                            ),
+                            file,
+                        )
 
             print("Saving completed")
 
