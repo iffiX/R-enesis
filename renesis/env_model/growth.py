@@ -40,9 +40,9 @@ class GrowthModel(BaseModel):
             raise ValueError(
                 f"Max view size must be an odd number, got {max_view_size}"
             )
+        actuation_features = actuation_features or ()
         for a in actuation_features:
             assert a in ("amplitude", "frequency", "phase_offset")
-        assert len(actuation_features) > 0
 
         self.materials = materials
         self.max_dimension_size = max_dimension_size
@@ -57,8 +57,8 @@ class GrowthModel(BaseModel):
         self.center_voxel_pos = np.asarray((self.actual_dimension_size // 2,) * 3)
         self.voxels = None
         self.occupied = None
-        self.occupied_positions = []
-        self.occupied_values = []
+        self.occupied_non_zero_positions = []
+        self.occupied_non_zero_values = []
         self.num_non_zero_voxel = 0
         self.num_voxels = 0
         self.body = None
@@ -83,8 +83,8 @@ class GrowthModel(BaseModel):
             dtype=float,
         )
         self.occupied = np.zeros([self.actual_dimension_size] * 3, dtype=bool)
-        self.occupied_positions = []
-        self.occupied_values = []
+        self.occupied_non_zero_positions = []
+        self.occupied_non_zero_values = []
         self.num_non_zero_voxel = 0
         self.num_voxels = 0
         self.steps = 0
@@ -217,6 +217,10 @@ class GrowthModel(BaseModel):
         """
         voxel = self.body[-1]
         valid_position_indices = []
+
+        if self.steps == 0:
+            return [0]
+
         for idx, offset in enumerate(
             np.asarray(
                 [[-1, 0, 0], [1, 0, 0], [0, -1, 0], [0, 1, 0], [0, 0, -1], [0, 0, 1]]
@@ -238,7 +242,7 @@ class GrowthModel(BaseModel):
         Attach a configuration of voxels to the current voxel.
 
         Args:
-            configuration: an array of shape [6, material_num, 4]
+            configuration: an array of shape [6, material_num, 1 + num_actuation_features]
             current_voxel: current voxel coordinate
 
         Note:
@@ -290,18 +294,22 @@ class GrowthModel(BaseModel):
             material: material index
             actuation: array of shape [3], amplitude, frequency and phase shift
         """
-        self.occupied_positions.append(coordinates.tolist())
-        self.occupied_values.append(material)
         self.num_voxels += 1
         self.voxels[coordinates[0], coordinates[1], coordinates[2], 0] = material
+
         self.occupied[coordinates[0], coordinates[1], coordinates[2]] = True
 
         # Only store actuation data if a non-0 voxel is attached
         # Since we can only attach new voxels to a non-0 voxel, only append
         # it to the body queue when voxel is not 0.
         if material != 0:
+            self.occupied_non_zero_positions.append(coordinates.tolist())
+            self.occupied_non_zero_values.append(material)
             self.num_non_zero_voxel += 1
-            self.voxels[coordinates[0], coordinates[1], coordinates[2], 1:] = actuation
+            if len(self.actuation_features) > 0:
+                self.voxels[
+                    coordinates[0], coordinates[1], coordinates[2], 1:
+                ] = actuation
             self.body.appendleft(coordinates)
         # print(f"New voxel at {coordinates}, material {material}, actuation {actuation}")
 

@@ -128,11 +128,15 @@ class CPPN:
         # relative_index,
         # is_input_node, is_output_node, is_empty_hidden_node, function one-hot encodings
         features = np.zeros([len(self.nodes), 4 + len(self.functions)], dtype=float)
-        features[: self.input_node_num, 0] = list(range(self.input_node_num))
+        features[: self.input_node_num, 0] = [
+            x / self.input_node_num for x in range(self.input_node_num)
+        ]
         features[
             self.input_node_num : self.input_node_num + self.output_node_num, 0
-        ] = list(range(self.output_node_num))
-        features[-self.hidden_node_num :, 0] = list(range(self.hidden_node_num))
+        ] = [x / self.output_node_num for x in range(self.output_node_num)]
+        features[-self.hidden_node_num :, 0] = [
+            x / self.hidden_node_num for x in range(self.hidden_node_num)
+        ]
 
         features[: self.input_node_num, 1] = 1
         features[
@@ -529,7 +533,7 @@ class CPPNBaseModel(BaseModel):
             )
         )
 
-    def reset(self):
+    def reset(self, initial_steps=0):
         self.steps = 0
         self.cppn = CPPN(
             4,
@@ -537,6 +541,8 @@ class CPPNBaseModel(BaseModel):
             self.cppn_hidden_node_num,
             functions=self.cppn_functions,
         )
+        for i in range(initial_steps):
+            self.step(self.select_action())
 
     def is_finished(self):
         return False
@@ -553,9 +559,6 @@ class CPPNBaseModel(BaseModel):
         self.steps += 1
 
     def observe(self):
-        # Repeated needs the observation length to be at least 1
-        # Add a padding at the front so we can remove it later
-        # edges = self.cppn.get_edges_and_weights()
         result = OrderedDict(
             [
                 ("node_ranks", self.cppn.get_node_ranks().astype(np.float64)),
@@ -623,6 +626,21 @@ class CPPNBaseModel(BaseModel):
     #     # print(self.cppn.node_ranks)
     #     # print(node_mask)
     #     return reward
+
+    def select_action(self):
+        node_ranks = self.observe()["node_ranks"]
+        source_node_mask = CPPN.get_source_node_mask(node_ranks)
+        # Randomly sample a valid source node
+        source_node = np.random.choice(np.where(source_node_mask.astype(bool))[0])
+        target_node_mask = CPPN.get_target_node_mask(source_node, node_ranks)
+        # Randomly sample a valid target node
+        target_node = np.random.choice(np.where(target_node_mask.astype(bool))[0])
+        target_function = np.random.choice(list(range(len(self.cppn_functions))))
+        has_edge = np.random.choice([0, 1])
+        weight = float(np.random.normal(0, 1, 1))
+        return np.array(
+            [source_node, target_node, target_function, has_edge, weight], dtype=float,
+        )
 
     def update_voxels(self):
         raise NotImplementedError()
@@ -813,3 +831,12 @@ class CPPNBinaryTreeWithPhaseOffsetModel(CPPNBaseModel):
             self.voxels = np.zeros_like(self.voxels)
             self.occupied = np.zeros_like(self.occupied)
             self.num_non_zero_voxel = 0
+
+
+class CPPNVirtualShapeBinaryTreeModel(CPPNBinaryTreeModel):
+    def get_non_zero_voxel_positions(self):
+        return np.stack(np.nonzero(self.occupied), axis=1)
+
+    def get_non_zero_voxel_materials(self):
+        positions = np.nonzero(self.occupied)
+        return self.voxels[positions[0], positions[1], positions[2]]

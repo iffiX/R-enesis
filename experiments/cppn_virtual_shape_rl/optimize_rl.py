@@ -6,56 +6,45 @@ from ray import tune
 from ray.tune.logger import TBXLoggerCallback
 from ray.rllib.agents.ppo import PPOTrainer
 from renesis.env_model.cppn import CPPNBaseModel
-from renesis.env.voxcraft import VoxcraftCPPNBinaryTreeWithPhaseOffsetEnvironment
-from experiments.cppn_rl.utils import (
-    CustomCallbacks,
-    DataLoggerCallback,
-    # ActorSampling
-)
+from renesis.env.virtual_shape import VirtualShapeCPPNEnvironment
+from experiments.cppn_virtual_shape_evolution.utils import generate_3d_shape
+from experiments.cppn_virtual_shape_rl.utils import *
+
+# from experiments.cppn_virtual_shape_rl.utils import (
+#     # CustomCallbacks,
+#     # DataLoggerCallback,
+#     # ActorSampling
+# )
 
 from renesis.utils.debug import enable_debugger
-
-"""
-IMPORTANT: You MUST configure data/base.vxa to match the relevant
-configurations in this file.
-"""
 
 # 1GB heap memory, 1GB object store
 ray.init(_memory=1 * (10 ** 9), object_store_memory=10 ** 9)
 
+reference_shape = generate_3d_shape(10, 100)
 # vector_env_num_per_worker = 5
 config = {
-    "env": VoxcraftCPPNBinaryTreeWithPhaseOffsetEnvironment,
+    "env": VirtualShapeCPPNEnvironment,
     "env_config": {
-        "debug": False,
-        # "initial_max_random_steps": 39,
-        "dimension_size": 6,
-        "cppn_hidden_node_num": 10,
-        "max_steps": 40,
-        "reward_type": "distance_traveled",
-        "base_config_path": str(
-            os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "base.vxa")
-        ),
-        "voxel_size": 0.01,
-        "fallen_threshold": 0.25,
-        "num_envs": 128,  # vector_env_num_per_worker,
+        "dimension_size": 10,
+        "cppn_hidden_node_num": 30,
+        "max_steps": 100,
+        "reference_shape": reference_shape,
+        "reward_type": "correct_rate",
+        "render_config": {"distance": 30},
     },
-    "sgd_minibatch_size": 128,  # vector_env_num_per_worker * 2,
+    "disable_env_checking": True,
+    "render_env": False,
+    "sgd_minibatch_size": 128,
     "num_sgd_iter": 15,
-    "train_batch_size": 5120,  # 40 * vector_env_num_per_worker * 2,
-    "lr": 1e-5,
-    "rollout_fragment_length": 5,
+    "train_batch_size": 12800,
+    "lr": 1e-4,
+    "rollout_fragment_length": 100,
     "vf_clip_param": 10 ** 5,
     "seed": np.random.randint(10 ** 5),
-    # "num_workers": 2,
-    # "num_gpus": 0.1,
-    # "num_gpus_per_worker": 0.5,
-    # "num_envs_per_worker": vector_env_num_per_worker,
-    "num_workers": 1,
-    "num_gpus": 0.1,
-    "num_gpus_per_worker": 0.1,
-    "num_envs_per_worker": 16,  # vector_env_num_per_worker,
-    "placement_strategy": "SPREAD",
+    "num_workers": 8,
+    "num_gpus": 1,
+    "num_envs_per_worker": 16,
     "num_cpus_per_worker": 1,
     "framework": "torch",
     # Set up a separate evaluation worker set for the
@@ -63,28 +52,6 @@ config = {
     "evaluation_interval": 1,
     "evaluation_duration": 10,
     "evaluation_num_workers": 1,
-    # Only for evaluation runs, render the env.
-    "evaluation_config": {
-        "render_env": False,
-        "explore": True,
-        "env_config": {
-            "debug": False,
-            # "initial_max_random_steps": 0,
-            "dimension_size": 6,
-            "cppn_hidden_node_num": 10,
-            "max_steps": 40,
-            "reward_type": "distance_traveled",
-            "base_config_path": str(
-                os.path.join(
-                    os.path.dirname(os.path.abspath(__file__)), "data", "base.vxa"
-                )
-            ),
-            "voxel_size": 0.01,
-            "fallen_threshold": 0.25,
-            "num_envs": 8,  # vector_env_num_per_worker,
-        },
-    },
-    # "monitor": True,
     "model": {
         "custom_action_dist": "actor_dist",
         "custom_model": "actor_model",
@@ -98,12 +65,14 @@ config = {
             "cppn_input_node_num": 4,
             "cppn_output_node_num": 3,
             "target_function_num": len(CPPNBaseModel.DEFAULT_CPPN_FUNCTIONS),
+            "dropout_prob": 0.3
             # "initial_temperature": 5,
             # "exploration_timesteps": -1,
         },
     },
+    "evaluation_config": {"model": {"custom_model_config": {"dropout_prob": 0}}}
     # "exploration_config": {"type": ActorSampling},
-    "callbacks": CustomCallbacks,
+    # "callbacks": CustomCallbacks,
 }
 
 # config["model"]["custom_model_config"]["exploration_timesteps"] = (
@@ -152,9 +121,9 @@ if __name__ == "__main__":
         log_to_file=True,
         stop={
             "timesteps_total": config["train_batch_size"] * 100,
-            "episodes_total": config["train_batch_size"] * 100 / 40,
+            "episodes_total": config["train_batch_size"] * 100 / 100,
         },
         # Order is important!
-        callbacks=[DataLoggerCallback(), TBXLoggerCallback()]
+        # callbacks=[DataLoggerCallback(), TBXLoggerCallback()]
         # restore=,
     )

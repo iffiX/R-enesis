@@ -445,7 +445,9 @@ class Actor(TorchModelV2, nn.Module):
         #         model_config["custom_model_config"]["debug_ip"],
         #         model_config["custom_model_config"]["debug_port"],
         #     )
-
+        print(
+            f"Initializing model with config: \n{model_config['custom_model_config']}"
+        )
         self.gat = GAT(
             input_feature_num=model_config["custom_model_config"]["input_feature_num"],
             hidden_feature_num=model_config["custom_model_config"][
@@ -456,7 +458,7 @@ class Actor(TorchModelV2, nn.Module):
             ],
             layer_num=model_config["custom_model_config"]["layer_num"],
             head_num=model_config["custom_model_config"]["head_num"],
-            dropout_prob=0,
+            dropout_prob=model_config["custom_model_config"]["dropout_prob"],
         )
 
         output_feature_num = model_config["custom_model_config"]["output_feature_num"]
@@ -495,7 +497,6 @@ class Actor(TorchModelV2, nn.Module):
     ) -> (TensorType, List[TensorType]):
         # shape [batch_size, node_num]
         node_ranks = input_dict["obs"]["node_ranks"]
-
         # shape [batch_size, node_num, node_feature_num]
         nodes = input_dict["obs"]["nodes"]
 
@@ -517,6 +518,7 @@ class Actor(TorchModelV2, nn.Module):
 
         # for debugging
         # if t.any(t.isnan(output)):
+        #     enable_debugger()
         #     x = self.gat(nodes, new_edges, new_edge_num, new_edge_weight)
 
         self._shared_base_output = output

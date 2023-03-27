@@ -255,6 +255,7 @@ class VoxcraftCPPNBinaryTreeEnvironment(VoxcraftBaseEnvironment):
     metadata = {"render.modes": ["ansi"]}
 
     def __init__(self, config):
+        self.initial_max_random_steps = config.get("initial_max_random_steps", 0)
         if config.get("debug", False):
             enable_debugger(config["debug_ip"], config["debug_port"])
         env_models = [
@@ -265,6 +266,30 @@ class VoxcraftCPPNBinaryTreeEnvironment(VoxcraftBaseEnvironment):
             for _ in range(config["num_envs"])
         ]
         super().__init__(config, env_models)
+
+    # @override(VectorEnv)
+    # def reset_at(self, index: Optional[int] = None):
+    #     if index is None:
+    #         index = 0
+    #     self.env_models[index].reset(
+    #         np.random.randint(0, self.initial_max_random_steps + 1)
+    #     )
+    #     self.previous_rewards[index] = 0
+    #     self.robots[index] = "\n"
+    #     self.robot_sim_histories[index] = ""
+    #     self.state_data[index] = None
+    #     return self.env_models[index].observe()
+    #
+    # @override(VectorEnv)
+    # def vector_reset(self):
+    #     for model in self.env_models:
+    #         model.reset(np.random.randint(0, self.initial_max_random_steps + 1))
+    #
+    #     self.previous_rewards = [0 for _ in range(self.num_envs)]
+    #     self.robots = ["\n" for _ in range(self.num_envs)]
+    #     self.robot_sim_histories = ["" for _ in range(self.num_envs)]
+    #     self.state_data = [None for _ in range(self.num_envs)]
+    #     return [model.observe() for model in self.env_models]
 
     # def get_rewards(self, all_finished):
     #     base_rewards = super().get_rewards(all_finished)
@@ -278,6 +303,7 @@ class VoxcraftCPPNBinaryTreeWithPhaseOffsetEnvironment(VoxcraftBaseEnvironment):
     metadata = {"render.modes": ["ansi"]}
 
     def __init__(self, config):
+        self.initial_max_random_steps = config.get("initial_max_random_steps", 0)
         if config.get("debug", False):
             enable_debugger(config["debug_ip"], config["debug_port"])
         env_models = [
@@ -288,3 +314,27 @@ class VoxcraftCPPNBinaryTreeWithPhaseOffsetEnvironment(VoxcraftBaseEnvironment):
             for _ in range(config["num_envs"])
         ]
         super().__init__(config, env_models)
+
+    # @override(VectorEnv)
+    # def reset_at(self, index: Optional[int] = None):
+    #     if index is None:
+    #         index = 0
+    #     self.env_models[index].reset(
+    #         np.random.randint(0, self.initial_max_random_steps + 1)
+    #     )
+    #     self.previous_rewards[index] = 0
+    #     self.robots[index] = "\n"
+    #     self.robot_sim_histories[index] = ""
+    #     self.state_data[index] = None
+    #     return self.env_models[index].observe()
+    #
+    # @override(VectorEnv)
+    # def vector_reset(self):
+    #     for model in self.env_models:
+    #         model.reset(np.random.randint(0, self.initial_max_random_steps + 1))
+    #
+    #     self.previous_rewards = [0 for _ in range(self.num_envs)]
+    #     self.robots = ["\n" for _ in range(self.num_envs)]
+    #     self.robot_sim_histories = ["" for _ in range(self.num_envs)]
+    #     self.state_data = [None for _ in range(self.num_envs)]
+    #     return [model.observe() for model in self.env_models]

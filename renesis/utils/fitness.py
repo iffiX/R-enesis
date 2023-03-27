@@ -1,6 +1,6 @@
 import numpy as np
 from scipy.spatial import ConvexHull
-from renesis.utils.plotting import get_vertices_of_voxel
+from renesis.utils.plotter import get_vertices_of_voxel
 
 
 def max_z(final_positions):
