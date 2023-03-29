@@ -1,6 +1,6 @@
 import numpy as np
 from scipy.spatial import ConvexHull
-from renesis.utils.plotter import get_vertices_of_voxel
+from renesis.utils.plotter import Plotter
 
 
 def max_z(final_positions):
@@ -67,7 +67,7 @@ def get_convex_hull_area(x):
 def get_convex_hull_volume(x):
     if len(x) == 0:
         return 0
-    x, _, _ = get_vertices_of_voxel(x)
+    x, _, _ = Plotter.get_vertices_of_voxel(x)
     return ConvexHull(x).volume
 
 

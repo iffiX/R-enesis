@@ -3,7 +3,7 @@ import pickle
 from PIL import Image
 from renesis.utils.plotter import Plotter
 
-PATH = "/home/iffi/data"
+PATH = "/home/iffi/ray_results/PPO_2023-03-27_22-48-00/PPO_VirtualShapeGMMEnvironment_55c6c_00000_0_2023-03-27_22-48-00/data"
 
 if __name__ == "__main__":
     plotter = Plotter()
@@ -16,11 +16,7 @@ if __name__ == "__main__":
             Image.fromarray(img, mode="RGB").save(
                 os.path.join(PATH, os.path.basename(gen_path))
             )
-            img = plotter.plot_voxel_error(
-                ref,
-                vox,
-                distance=3 * dim,
-            )
+            img = plotter.plot_voxel_error(ref, vox, distance=3 * dim,)
             Image.fromarray(img, mode="RGB").save(
                 os.path.join(PATH, os.path.basename(error_path))
             )

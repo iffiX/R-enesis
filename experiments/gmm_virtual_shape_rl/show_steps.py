@@ -8,6 +8,7 @@ from ray.tune.logger import TBXLoggerCallback
 from ray.rllib.algorithms.algorithm import Algorithm
 from ray.rllib.algorithms.ppo import PPO
 from renesis.utils.plotter import Plotter
+from renesis.utils.media import create_video_subproc
 from renesis.env.virtual_shape import VirtualShapeGMMEnvironment, sigmoid
 from experiments.cppn_virtual_shape_evolution.utils import (
     generate_3d_shape,
@@ -20,7 +21,7 @@ from experiments.gmm_virtual_shape_rl.utils import *
 from renesis.utils.debug import enable_debugger
 
 dimension = 10
-steps = 40
+steps = 20
 # reference_shape = generate_sphere(dimension)
 # reference_shape = generate_3d_shape(
 #     10, 200, change_material_when_same_minor_prob=0.2, fill_num=(3,)
@@ -46,7 +47,7 @@ config = {
     "train_batch_size": steps * 5 * 128,
     "lr": 1e-4,
     "rollout_fragment_length": steps * 5,
-    "vf_clip_param": 10**5,
+    "vf_clip_param": 10 ** 5,
     "seed": 132434,
     "num_workers": 1,
     "num_envs_per_worker": 1,
@@ -76,10 +77,12 @@ config = {
 
 if __name__ == "__main__":
     # 1GB heap memory, 1GB object store
-    ray.init(_memory=1 * (10**9), object_store_memory=10**9, num_gpus=0)
+    ray.init(_memory=1 * (10 ** 9), object_store_memory=10 ** 9, num_gpus=0)
 
     algo = PPO(config=config)
-    algo.restore("/home/iffi/checkpoint_000075")
+    algo.restore(
+        "/home/iffi/ray_results/PPO_2023-03-28_00-11-24/PPO_VirtualShapeGMMEnvironment_fc689_00000_0_2023-03-28_00-11-24/checkpoint_000145"
+    )
 
     # Create the env to do inference in.
     env = VirtualShapeGMMEnvironment(config["env_config"])
@@ -90,7 +93,7 @@ if __name__ == "__main__":
         "attention_dim", 64
     )
     transformer_memory_size = config["model"]["custom_model_config"].get(
-        "memory_inference", 50
+        "memory_inference", steps
     )
     transformer_length = config["model"]["custom_model_config"].get(
         "num_transformer_units", 1
@@ -100,13 +103,12 @@ if __name__ == "__main__":
         for _ in range(transformer_length)
     ]
     episode_reward = 0
-    plotter = Plotter()
+    plotter = Plotter(interactive=False)
+    voxel_inputs = []
     for i in range(20):
         # Compute an action (`a`).
         a, state_out, *_ = algo.compute_single_action(
-            observation=obs,
-            state=state,
-            explore=True,
+            observation=obs, state=state, explore=True,
         )
         # Send the computed action `a` to the env.
         obs, reward, done, _ = env.step(a)
@@ -118,10 +120,16 @@ if __name__ == "__main__":
             np.concatenate([state[i], [state_out[i]]], axis=0)[1:]
             for i in range(transformer_length)
         ]
-        img = plotter.plot_voxel_error(
-            reference_shape, env.env_model.voxels, distance=dimension * 3
-        )
-        Image.fromarray(img, mode="RGB").show(title=f"step={i}")
+        voxel_inputs.append(np.copy(env.env_model.voxels))
+
+    pv.global_theme.window_size = [2048, 768]
+    imgs = plotter.plot_voxel_steps(
+        reference_shape, voxel_inputs, distance=dimension * 3
+    )
+    wait = create_video_subproc(
+        imgs, path="./", filename=f"steps", fps=1, extension=".mp4",
+    )
+    wait()
     # img = plotter.plot_voxel_error(
     #     reference_shape, env.env_model.voxels, distance=dimension * 3
     # )

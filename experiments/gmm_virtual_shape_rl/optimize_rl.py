@@ -20,13 +20,13 @@ from experiments.gmm_virtual_shape_rl.utils import *
 from renesis.utils.debug import enable_debugger
 
 dimension = 10
-steps = 40
+steps = 20
 # reference_shape = generate_sphere(dimension)
 # reference_shape = generate_3d_shape(
 #     10, 200, change_material_when_same_minor_prob=0.2, fill_num=(3,)
 # )
-# reference_shape = generate_random_ellipsoids(dimension, num=steps // 2)
-reference_shape = generate_cross(dimension)
+reference_shape = generate_random_ellipsoids(dimension, num=10)
+# reference_shape = generate_cross(dimension)
 # plotter = Plotter(interactive=True)
 # plotter.plot_voxel(reference_shape, distance=dimension * 3)
 # vector_env_num_per_worker = 5
@@ -46,12 +46,12 @@ config = {
     "render_env": False,
     "sgd_minibatch_size": 128,
     "num_sgd_iter": 15,
-    "train_batch_size": steps * 5 * 128,
+    "train_batch_size": steps * 5 * 80,
     "lr": 1e-4,
     "rollout_fragment_length": steps * 5,
-    "vf_clip_param": 10**5,
+    "vf_clip_param": 10 ** 5,
     "seed": 132434,
-    "num_workers": 16,
+    "num_workers": 10,
     "num_gpus": 1,
     "num_envs_per_worker": 8,
     "num_cpus_per_worker": 1,
@@ -80,7 +80,7 @@ config = {
 
 if __name__ == "__main__":
     # 1GB heap memory, 1GB object store
-    ray.init(_memory=1 * (10**9), object_store_memory=10**9)
+    ray.init(_memory=1 * (10 ** 9), object_store_memory=10 ** 9)
 
     tune.run(
         PPO,
@@ -90,15 +90,15 @@ if __name__ == "__main__":
         keep_checkpoints_num=10,
         log_to_file=True,
         stop={
-            "timesteps_total": config["train_batch_size"] * 100,
-            "episodes_total": config["train_batch_size"] * 100 / steps,
+            "timesteps_total": config["train_batch_size"] * 200,
+            "episodes_total": config["train_batch_size"] * 200 / steps,
         },
         # Order is important!
         callbacks=[
-            DataLoggerCallback(reference_shape, dimension, render=False),
+            DataLoggerCallback(reference_shape, dimension),
             TBXLoggerCallback(),
-        ]
-        # restore=,
+        ],
+        # restore="/home/iffi/ray_results/PPO_2023-03-27_22-56-57/PPO_VirtualShapeGMMEnvironment_95aee_00000_0_2023-03-27_22-56-57/checkpoint_000100/checkpoint-100",
     )
 
     # algo = PPO(config=config)

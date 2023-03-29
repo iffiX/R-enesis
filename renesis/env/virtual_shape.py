@@ -1,5 +1,6 @@
 import gym
 import numpy as np
+from gym.spaces import Box
 from renesis.utils.plotter import Plotter
 from renesis.env_model.cppn import CPPNVirtualShapeBinaryTreeModel
 from renesis.env_model.gmm import GMMModel
@@ -94,6 +95,7 @@ class VirtualShapeGMMEnvironment(gym.Env):
         self.max_steps = config["max_steps"]
         self.action_space = self.env_model.action_space
         self.observation_space = self.env_model.observation_space
+        # self.observation_space = Box(low=0, high=1, shape=(8,))
         self.reward_range = (0, float("inf"))
         self.reward_type = config["reward_type"]
         self.render_config = config.get(
@@ -110,10 +112,14 @@ class VirtualShapeGMMEnvironment(gym.Env):
         # for act in self.actions:
         #     str += f"{act}\n"
         # print(str)
+        # return np.concatenate(
+        #     (self.env_model.observe(), np.array([self.previous_reward / 10]))
+        # )
         return self.env_model.observe()
 
     def step(self, action):
-        self.env_model.step(sigmoid(action))
+        # self.env_model.step(sigmoid(action))
+        self.env_model.step((np.clip(action, -2, 2) + 2) / 4)
         reward = self.get_reward()
         reward_diff = reward - self.previous_reward
         self.previous_reward = reward
@@ -122,7 +128,13 @@ class VirtualShapeGMMEnvironment(gym.Env):
         # print(f"Step {self.env_model.steps}: reward {reward} action {action}")
         # print(reward_diff)
         # self.actions.append(action)
-        return self.env_model.observe(), reward_diff, done, {}
+        return (
+            # np.concatenate((self.env_model.observe(), np.array([reward / 10]))),
+            self.env_model.observe(),
+            reward_diff,
+            done,
+            {},
+        )
 
     def get_reward(self):
         correct_num = np.sum(

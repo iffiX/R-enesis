@@ -72,7 +72,12 @@ class Plotter:
             origin, material = self.voxel_array_to_origin_and_material(args[0])
         else:
             origin, material = args
-            if len(origin) == 0 or len(material) == 0:
+            if (
+                origin is None
+                or material is None
+                or len(origin) == 0
+                or len(material) == 0
+            ):
                 origin = None
                 material = None
 
@@ -145,7 +150,6 @@ class Plotter:
             palette: Array of shape [m, 3], where m is the number of materials,
                 The first material corresponds to material 1. Or a list of strings.
             distance: Camera distance. Set to -1 for auto distance.
-            plotter: pyvista plotter
 
         Returns:
             An image of shape [height, width, 3], or None if plotter is interactive
@@ -222,6 +226,160 @@ class Plotter:
         pv.close_all()
         return img
 
+    def plot_voxel_steps(
+        self,
+        voxel_ref: np.ndarray,
+        voxel_steps: List[np.ndarray],
+        palette: Union[List[List[float]], List[str], np.ndarray] = None,
+        distance: float = 10,
+    ):
+        """
+        Args:
+            voxel_ref: 3D array of shape reference.
+            voxel_steps: 3D array of each shape input.
+            palette: Array of shape [m, 3], where m is the number of materials,
+                The first material corresponds to material 1. Or a list of strings.
+            distance: Camera distance. Set to -1 for auto distance.
+
+        Returns:
+            A list of images of shape [height, width, 3], or None if plotter is interactive
+        """
+        if voxel_ref.shape != voxel_steps[0].shape:
+            raise ValueError(
+                "Reference voxel shape must be the same as input voxel shape"
+            )
+
+        imgs = []
+        voxel_prev_input = np.zeros_like(voxel_steps[0])
+        for idx, voxel_input in enumerate(voxel_steps):
+            plotter = pv.Plotter(off_screen=not self.interactive, shape=(1, 4))
+
+            plotter.subplot(0, 0)
+            plotter.add_text("Reference", font_size=10)
+            self.plot_voxel(
+                *self.voxel_array_to_origin_and_material(voxel_ref),
+                palette=palette,
+                distance=distance,
+                plotter=plotter,
+            )
+
+            plotter.subplot(0, 1)
+            plotter.add_text(f"Input-{idx}", font_size=10)
+            self.plot_voxel(
+                *self.voxel_array_to_origin_and_material(voxel_input),
+                palette=palette,
+                distance=distance,
+                plotter=plotter,
+            )
+
+            plotter.subplot(0, 2)
+            plotter.add_text(f"Error-{idx}", font_size=10)
+            error = self.get_voxel_error(voxel_ref, voxel_input)
+            # Plot error
+            error_origins, error_materials = self.voxel_array_to_origin_and_material(
+                error
+            )
+            (
+                error_points,
+                error_num_voxels,
+                error_num_vertices,
+            ) = self.get_vertices_of_voxel(error_origins)
+            error_cells_hex = np.arange(error_num_vertices).reshape(
+                (error_num_voxels, 8)
+            )
+            error_grid = pv.UnstructuredGrid(
+                {vtk.VTK_HEXAHEDRON: error_cells_hex}, error_points
+            )
+            plotter.add_mesh(
+                error_grid,
+                show_edges=True,
+                scalars=np.array(error_materials),
+                annotations={1: "missing", 2: "excess", 3: "wrong"},
+                cmap=["purple", "blue", "orange"],
+                clim=[1, 3],
+                opacity=0.9,
+            )
+            # Plot reference edge frame
+            ref_origins, ref_materials = self.voxel_array_to_origin_and_material(
+                voxel_ref
+            )
+            ref_points, ref_num_voxels, ref_num_vertices = self.get_vertices_of_voxel(
+                ref_origins
+            )
+            ref_cells_hex = np.arange(ref_num_vertices).reshape((ref_num_voxels, 8))
+            ref_grid = pv.UnstructuredGrid(
+                {vtk.VTK_HEXAHEDRON: ref_cells_hex}, ref_points
+            )
+            edge = ref_grid.extract_all_edges()
+            plotter.add_mesh(edge, opacity=0.5, color="white")
+            plotter.add_floor("-z")
+            plotter.enable_depth_peeling(1)
+            camera, focus, viewup = plotter.get_default_cam_pos()
+            plotter.camera_position = [
+                (camera[0] - distance, camera[1] - distance, camera[2]),
+                focus,
+                viewup,
+            ]
+
+            plotter.subplot(0, 3)
+            plotter.add_text(f"Difference-{idx}", font_size=10)
+            same, diff = self.get_voxel_difference(voxel_prev_input, voxel_input)
+            # Plot error
+            same_origins, same_materials = self.voxel_array_to_origin_and_material(same)
+            if same_origins is not None:
+                (
+                    same_points,
+                    same_num_voxels,
+                    same_num_vertices,
+                ) = self.get_vertices_of_voxel(same_origins)
+                same_cells_hex = np.arange(same_num_vertices).reshape(
+                    (same_num_voxels, 8)
+                )
+                same_grid = pv.UnstructuredGrid(
+                    {vtk.VTK_HEXAHEDRON: same_cells_hex}, same_points
+                )
+                plotter.add_mesh(
+                    same_grid, show_edges=True, color="black", opacity=0.5,
+                )
+
+            diff_origins, diff_materials = self.voxel_array_to_origin_and_material(diff)
+            if diff_origins is not None:
+                (
+                    diff_points,
+                    diff_num_voxels,
+                    diff_num_vertices,
+                ) = self.get_vertices_of_voxel(diff_origins)
+                diff_cells_hex = np.arange(diff_num_vertices).reshape(
+                    (diff_num_voxels, 8)
+                )
+                diff_grid = pv.UnstructuredGrid(
+                    {vtk.VTK_HEXAHEDRON: diff_cells_hex}, diff_points
+                )
+                plotter.add_mesh(
+                    diff_grid, show_edges=True, color="yellow", opacity=0.9,
+                )
+
+            plotter.add_floor("-z")
+            plotter.enable_depth_peeling(1)
+            camera, focus, viewup = plotter.get_default_cam_pos()
+            plotter.camera_position = [
+                (camera[0] - distance, camera[1] - distance, camera[2]),
+                focus,
+                viewup,
+            ]
+
+            if self.interactive:
+                plotter.show()
+                img = None
+            else:
+                img = plotter.screenshot(return_img=True)
+            if img is not None:
+                imgs.append(img)
+            plotter.close()
+            pv.close_all()
+            voxel_prev_input = voxel_input
+        return imgs if not self.interactive else None
+
     @staticmethod
     def voxel_array_to_origin_and_material(voxel: np.ndarray):
         """
@@ -251,6 +409,14 @@ class Plotter:
         voxel_error[excessive] = 2
         voxel_error[wrong] = 3
         return voxel_error
+
+    @staticmethod
+    def get_voxel_difference(voxel_prev: np.ndarray, voxel_next: np.ndarray):
+        voxel_same = np.zeros_like(voxel_prev)
+        voxel_diff = np.zeros_like(voxel_prev)
+        voxel_same[np.logical_and(voxel_prev != 0, voxel_prev == voxel_next)] = 1
+        voxel_diff[voxel_prev != voxel_next] = 1
+        return voxel_same, voxel_diff
 
     @staticmethod
     def get_vertices_of_voxel(origin: np.ndarray):
