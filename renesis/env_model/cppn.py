@@ -28,7 +28,7 @@ def get_gaussian_pdf(mu=0, std=1):
     divider = std * np.sqrt(2 * np.pi)
 
     def gaussian_pdf(x):
-        return np.exp(-((x - mu) ** 2) / (2 * std ** 2)) / divider
+        return np.exp(-((x - mu) ** 2) / (2 * std**2)) / divider
 
     return gaussian_pdf
 
@@ -140,7 +140,8 @@ class CPPN:
 
         features[: self.input_node_num, 1] = 1
         features[
-            self.input_node_num : self.input_node_num + self.output_node_num, 2,
+            self.input_node_num : self.input_node_num + self.output_node_num,
+            2,
         ] = 1
         function_names = list(self.functions.keys())
         for i in range(self.input_node_num + self.output_node_num, len(self.nodes)):
@@ -178,7 +179,9 @@ class CPPN:
 
     @classmethod
     def get_target_node_mask(
-        cls, source_node: int, node_ranks: np.ndarray,
+        cls,
+        source_node: int,
+        node_ranks: np.ndarray,
     ):
         """
         Args:
@@ -331,7 +334,9 @@ class CPPN:
         return unpruned_graph, pruned_graph
 
     def recursive_find_dependent_nodes(
-        self, roots: List[int], mask: List[bool],
+        self,
+        roots: List[int],
+        mask: List[bool],
     ):
         """
         Find all nodes that are connected to an output node.
@@ -435,7 +440,7 @@ class CPPNBaseModel(BaseModel):
             ("sin", wrap_with_aggregator(np.sin)),
             ("gaussian", wrap_with_aggregator(get_gaussian_pdf(0, 1))),
             ("sigmoid", wrap_with_aggregator(lambda x: 1 / (1 + np.exp(-x)))),
-            ("power_square", wrap_with_aggregator(lambda x: x ** 2)),
+            ("power_square", wrap_with_aggregator(lambda x: x**2)),
             ("root_square", wrap_with_aggregator(lambda x: np.sqrt(x))),
             ("agg_sum", wrap_with_aggregator(lambda x: x, lambda x: np.sum(x, axis=0))),
             (
@@ -553,7 +558,11 @@ class CPPNBaseModel(BaseModel):
     def step(self, action: np.ndarray):
         # print(action)
         self.cppn.step(
-            int(action[0]), int(action[1]), int(action[2]), int(action[3]), action[4],
+            int(action[0]),
+            int(action[1]),
+            int(action[2]),
+            int(action[3]),
+            action[4],
         )
         self.update_voxels()
         self.steps += 1
@@ -639,7 +648,8 @@ class CPPNBaseModel(BaseModel):
         has_edge = np.random.choice([0, 1])
         weight = float(np.random.normal(0, 1, 1))
         return np.array(
-            [source_node, target_node, target_function, has_edge, weight], dtype=float,
+            [source_node, target_node, target_function, has_edge, weight],
+            dtype=float,
         )
 
     def update_voxels(self):
@@ -720,7 +730,10 @@ class CPPNBinaryTreeModel(CPPNBaseModel):
             0,
             np.where(outputs[1] < 0.5, 1, np.where(outputs[2] < 0.5, 2, 3)),
         )
-        self.voxels = np.zeros([self.dimension_size] * 3, dtype=float,)
+        self.voxels = np.zeros(
+            [self.dimension_size] * 3,
+            dtype=float,
+        )
         self.voxels[
             coords[:, 0] + self.center_voxel_offset,
             coords[:, 1] + self.center_voxel_offset,
@@ -812,8 +825,15 @@ class CPPNBinaryTreeWithPhaseOffsetModel(CPPNBaseModel):
         outputs = self.cppn.eval(inputs)
         outputs = [sigmoid(outputs[0]), sigmoid(outputs[1]), outputs[2]]
 
-        material = np.where(outputs[0] < 0.5, 0, np.where(outputs[1] < 0.5, 1, 2),)
-        self.voxels = np.zeros([self.dimension_size] * 3 + [2], dtype=float,)
+        material = np.where(
+            outputs[0] < 0.5,
+            0,
+            np.where(outputs[1] < 0.5, 1, 2),
+        )
+        self.voxels = np.zeros(
+            [self.dimension_size] * 3 + [2],
+            dtype=float,
+        )
         self.voxels[
             coords[:, 0] + self.center_voxel_offset,
             coords[:, 1] + self.center_voxel_offset,

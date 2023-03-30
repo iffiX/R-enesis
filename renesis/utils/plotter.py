@@ -339,7 +339,10 @@ class Plotter:
                     {vtk.VTK_HEXAHEDRON: same_cells_hex}, same_points
                 )
                 plotter.add_mesh(
-                    same_grid, show_edges=True, color="black", opacity=0.5,
+                    same_grid,
+                    show_edges=True,
+                    color="black",
+                    opacity=0.5,
                 )
 
             diff_origins, diff_materials = self.voxel_array_to_origin_and_material(diff)
@@ -356,7 +359,10 @@ class Plotter:
                     {vtk.VTK_HEXAHEDRON: diff_cells_hex}, diff_points
                 )
                 plotter.add_mesh(
-                    diff_grid, show_edges=True, color="yellow", opacity=0.9,
+                    diff_grid,
+                    show_edges=True,
+                    color="yellow",
+                    opacity=0.9,
                 )
 
             plotter.add_floor("-z")
@@ -402,7 +408,8 @@ class Plotter:
         missing = np.logical_and(voxel_ref != 0, voxel_input == 0)
         excessive = np.logical_and(voxel_ref == 0, voxel_input != 0)
         wrong = np.logical_and(
-            np.logical_and(voxel_ref != 0, voxel_input != 0), voxel_ref != voxel_input,
+            np.logical_and(voxel_ref != 0, voxel_input != 0),
+            voxel_ref != voxel_input,
         )
         voxel_error = np.zeros_like(voxel_ref)
         voxel_error[missing] = 1

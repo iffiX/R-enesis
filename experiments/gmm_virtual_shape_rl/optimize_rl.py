@@ -20,12 +20,15 @@ from experiments.gmm_virtual_shape_rl.utils import *
 from renesis.utils.debug import enable_debugger
 
 dimension = 10
+iters = 200
 steps = 20
+workers = 32
+rollout = 20
 # reference_shape = generate_sphere(dimension)
 # reference_shape = generate_3d_shape(
 #     10, 200, change_material_when_same_minor_prob=0.2, fill_num=(3,)
 # )
-reference_shape = generate_random_ellipsoids(dimension, num=10)
+reference_shape = generate_random_ellipsoids(dimension, materials=(1,), num=10)
 # reference_shape = generate_cross(dimension)
 # plotter = Plotter(interactive=True)
 # plotter.plot_voxel(reference_shape, distance=dimension * 3)
@@ -34,7 +37,7 @@ config = {
     "env": VirtualShapeGMMEnvironment,
     "env_config": {
         "dimension_size": dimension,
-        "materials": (0, 1, 2, 3),
+        "materials": (0, 1),
         "max_gaussian_num": 100,
         "max_steps": steps,
         "reference_shape": reference_shape,
@@ -46,14 +49,14 @@ config = {
     "render_env": False,
     "sgd_minibatch_size": 128,
     "num_sgd_iter": 15,
-    "train_batch_size": steps * 5 * 80,
+    "train_batch_size": steps * workers * rollout,
     "lr": 1e-4,
-    "rollout_fragment_length": steps * 5,
-    "vf_clip_param": 10 ** 5,
+    "rollout_fragment_length": steps * rollout,
+    "vf_clip_param": 10**5,
     "seed": 132434,
-    "num_workers": 10,
+    "num_workers": workers,
     "num_gpus": 1,
-    "num_envs_per_worker": 8,
+    "num_envs_per_worker": 1,
     "num_cpus_per_worker": 1,
     "framework": "torch",
     # Set up a separate evaluation worker set for the
@@ -80,7 +83,7 @@ config = {
 
 if __name__ == "__main__":
     # 1GB heap memory, 1GB object store
-    ray.init(_memory=1 * (10 ** 9), object_store_memory=10 ** 9)
+    ray.init(_memory=1 * (10**9), object_store_memory=10**9)
 
     tune.run(
         PPO,
@@ -90,12 +93,12 @@ if __name__ == "__main__":
         keep_checkpoints_num=10,
         log_to_file=True,
         stop={
-            "timesteps_total": config["train_batch_size"] * 200,
-            "episodes_total": config["train_batch_size"] * 200 / steps,
+            "timesteps_total": config["train_batch_size"] * iters,
+            "episodes_total": config["train_batch_size"] * iters / steps,
         },
         # Order is important!
         callbacks=[
-            DataLoggerCallback(reference_shape, dimension),
+            DataLoggerCallback(reference_shape, dimension, render=False),
             TBXLoggerCallback(),
         ],
         # restore="/home/iffi/ray_results/PPO_2023-03-27_22-56-57/PPO_VirtualShapeGMMEnvironment_95aee_00000_0_2023-03-27_22-56-57/checkpoint_000100/checkpoint-100",

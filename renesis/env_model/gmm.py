@@ -16,7 +16,11 @@ def is_voxel_continuous(occupied: np.ndarray):
 
 class GMMModel(BaseModel):
     def __init__(
-        self, materials=(0, 1, 2), dimension_size=20, max_gaussian_num=100, cutoff=1e-2,
+        self,
+        materials=(0, 1, 2),
+        dimension_size=20,
+        max_gaussian_num=100,
+        cutoff=1e-2,
     ):
         """
         Tail bound from
@@ -43,11 +47,11 @@ class GMMModel(BaseModel):
     @property
     def action_space(self):
         # shape [7]
-        return Box(low=0, high=1, shape=(7,))
+        return Box(low=0, high=1, shape=(6 + len(self.materials),))
 
     @property
     def observation_space(self):
-        return Box(low=0, high=1, shape=(7,))
+        return Box(low=0, high=1, shape=(6 + len(self.materials),))
 
     def reset(self, initial_steps=0):
         self.steps = 0
@@ -70,7 +74,7 @@ class GMMModel(BaseModel):
         if self.gaussians:
             return self.gaussians[-1]
         else:
-            return np.array([0, 0, 0, 0, 0, 0, 0], dtype=np.float32)
+            return np.zeros((6 + len(self.materials),), dtype=np.float32)
 
     def get_robot(self):
         x_occupied = [
@@ -110,7 +114,8 @@ class GMMModel(BaseModel):
         # print(action)
         max_radius = self.dimension_size / 2
         return np.array(
-            [-max_radius, -max_radius, -max_radius, 0.1, 0.1, 0.1, 0]
+            [-max_radius, -max_radius, -max_radius, 0.1, 0.1, 0.1]
+            + [0] * len(self.materials)
         ) + action * np.array(
             [
                 max_radius * 2,
@@ -119,8 +124,8 @@ class GMMModel(BaseModel):
                 max_radius / 6 - 0.1,
                 max_radius / 6 - 0.1,
                 max_radius / 6 - 0.1,
-                len(self.materials) - 1,
             ]
+            + [1] * len(self.materials)
         )
 
     def update_voxels(self):
@@ -158,16 +163,16 @@ class GMMModel(BaseModel):
             values = np.where(values > np.max(values) * self.cutoff, values, 0)
             all_values.append(values)
 
-        self.voxels = np.zeros([self.dimension_size] * 3, dtype=float,)
+        self.voxels = np.zeros(
+            [self.dimension_size] * 3,
+            dtype=float,
+        )
 
         if self.gaussians:
             # all_values shape [coord_num, gaussian_num]
             all_values = np.stack(all_values, axis=1)
             material_map = np.array(
-                [
-                    self.materials[int(np.round(self.scale(gaussian)[-1]))]
-                    for gaussian in self.gaussians
-                ]
+                [self.materials[np.argmax(gaussian[6:])] for gaussian in self.gaussians]
             )
             material = np.where(
                 np.any(all_values > 0, axis=1),
