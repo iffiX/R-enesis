@@ -16,11 +16,7 @@ def is_voxel_continuous(occupied: np.ndarray):
 
 class GMMModel(BaseModel):
     def __init__(
-        self,
-        materials=(0, 1, 2),
-        dimension_size=20,
-        max_gaussian_num=100,
-        cutoff=1e-2,
+        self, materials=(0, 1, 2), dimension_size=20, max_gaussian_num=100, cutoff=1e-2,
     ):
         """
         Tail bound from
@@ -163,10 +159,7 @@ class GMMModel(BaseModel):
             values = np.where(values > np.max(values) * self.cutoff, values, 0)
             all_values.append(values)
 
-        self.voxels = np.zeros(
-            [self.dimension_size] * 3,
-            dtype=float,
-        )
+        self.voxels = np.zeros([self.dimension_size] * 3, dtype=float,)
 
         if self.gaussians:
             # all_values shape [coord_num, gaussian_num]

@@ -1,4 +1,5 @@
 import os
+import shutil
 import pickle
 import graphviz
 import numpy as np
@@ -18,6 +19,7 @@ from ray.rllib.models.torch.attention_net import (
 from ray.rllib.algorithms.callbacks import DefaultCallbacks
 from renesis.utils.plotter import Plotter
 from renesis.utils.sys_debug import print_model_size
+from launch.snapshot import get_snapshot
 
 t.set_printoptions(threshold=10000)
 
@@ -65,14 +67,7 @@ class CustomCallbacks(DefaultCallbacks):
         episode.media["episode_data"] = {}
 
     def on_episode_end(
-        self,
-        *,
-        worker,
-        base_env,
-        policies,
-        episode,
-        env_index,
-        **kwargs,
+        self, *, worker, base_env, policies, episode, env_index, **kwargs,
     ):
         # Check if there are multiple episodes in a batch, i.e.
         # "batch_mode": "truncate_episodes".
@@ -89,14 +84,7 @@ class CustomCallbacks(DefaultCallbacks):
         episode.media["episode_data"]["reward"] = env.get_reward()
         episode.media["episode_data"]["voxels"] = env.env_model.voxels
 
-    def on_train_result(
-        self,
-        *,
-        algorithm,
-        result,
-        trainer,
-        **kwargs,
-    ) -> None:
+    def on_train_result(self, *, algorithm, result, trainer, **kwargs,) -> None:
         # Remove non-evaluation data
         result["episode_media"] = {}
         if "sampler_results" in result:
@@ -135,6 +123,8 @@ class DataLoggerCallback(LoggerCallback):
 
     def log_trial_start(self, trial):
         trial.init_logdir()
+        snapshot = get_snapshot()
+        shutil.move(snapshot, os.path.join(trial.logdir, "code"))
         self._trial_local_dir[trial] = os.path.join(trial.logdir, "data")
         os.makedirs(self._trial_local_dir[trial], exist_ok=True)
 

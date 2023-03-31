@@ -47,7 +47,7 @@ config = {
     "train_batch_size": steps * 5 * 128,
     "lr": 1e-4,
     "rollout_fragment_length": steps * 5,
-    "vf_clip_param": 10**5,
+    "vf_clip_param": 10 ** 5,
     "seed": 132434,
     "num_workers": 1,
     "num_envs_per_worker": 1,
@@ -77,7 +77,7 @@ config = {
 
 if __name__ == "__main__":
     # 1GB heap memory, 1GB object store
-    ray.init(_memory=1 * (10**9), object_store_memory=10**9, num_gpus=0)
+    ray.init(_memory=1 * (10 ** 9), object_store_memory=10 ** 9, num_gpus=0)
 
     algo = PPO(config=config)
     algo.restore(
@@ -108,9 +108,7 @@ if __name__ == "__main__":
     for i in range(20):
         # Compute an action (`a`).
         a, state_out, *_ = algo.compute_single_action(
-            observation=obs,
-            state=state,
-            explore=True,
+            observation=obs, state=state, explore=True,
         )
         # Send the computed action `a` to the env.
         obs, reward, done, _ = env.step(a)
@@ -129,11 +127,7 @@ if __name__ == "__main__":
         reference_shape, voxel_inputs, distance=dimension * 3
     )
     wait = create_video_subproc(
-        imgs,
-        path="./",
-        filename=f"steps",
-        fps=1,
-        extension=".mp4",
+        imgs, path="./", filename=f"steps", fps=1, extension=".mp4",
     )
     wait()
     # img = plotter.plot_voxel_error(

@@ -20,15 +20,16 @@ from experiments.gmm_virtual_shape_rl.utils import *
 from renesis.utils.debug import enable_debugger
 
 dimension = 10
-iters = 200
+iters = 400
 steps = 20
-workers = 32
+workers = 10
+envs = 5
 rollout = 20
 # reference_shape = generate_sphere(dimension)
 # reference_shape = generate_3d_shape(
 #     10, 200, change_material_when_same_minor_prob=0.2, fill_num=(3,)
 # )
-reference_shape = generate_random_ellipsoids(dimension, materials=(1,), num=10)
+reference_shape = generate_random_ellipsoids(dimension, materials=(1, 2, 3), num=10)
 # reference_shape = generate_cross(dimension)
 # plotter = Plotter(interactive=True)
 # plotter.plot_voxel(reference_shape, distance=dimension * 3)
@@ -37,7 +38,7 @@ config = {
     "env": VirtualShapeGMMEnvironment,
     "env_config": {
         "dimension_size": dimension,
-        "materials": (0, 1),
+        "materials": (0, 1, 2, 3),
         "max_gaussian_num": 100,
         "max_steps": steps,
         "reference_shape": reference_shape,
@@ -47,12 +48,12 @@ config = {
     "normalize_actions": False,
     "disable_env_checking": True,
     "render_env": False,
-    "sgd_minibatch_size": 128,
-    "num_sgd_iter": 15,
-    "train_batch_size": steps * workers * rollout,
+    "sgd_minibatch_size": 512,
+    "num_sgd_iter": 30,
+    "train_batch_size": steps * workers * envs * rollout,
     "lr": 1e-4,
-    "rollout_fragment_length": steps * rollout,
-    "vf_clip_param": 10**5,
+    "rollout_fragment_length": steps * envs * rollout,
+    "vf_clip_param": 10 ** 5,
     "seed": 132434,
     "num_workers": workers,
     "num_gpus": 1,
@@ -69,9 +70,9 @@ config = {
         "max_seq_len": steps,
         "custom_model_config": {
             "num_transformer_units": 1,
-            "attention_dim": 16,
-            "head_dim": 16,
-            "position_wise_mlp_dim": 16,
+            "attention_dim": 32,
+            "head_dim": 32,
+            "position_wise_mlp_dim": 32,
             "memory_inference": steps,
             "memory_training": steps,
             "num_heads": 1,
@@ -83,7 +84,7 @@ config = {
 
 if __name__ == "__main__":
     # 1GB heap memory, 1GB object store
-    ray.init(_memory=1 * (10**9), object_store_memory=10**9)
+    ray.init(_memory=1 * (10 ** 9), object_store_memory=10 ** 9)
 
     tune.run(
         PPO,
