@@ -1,4 +1,5 @@
 import os
+import shutil
 import pickle
 import graphviz
 import gym.spaces
@@ -25,14 +26,14 @@ from ray.rllib.utils.exploration.stochastic_sampling import StochasticSampling
 from ray.rllib.algorithms.callbacks import DefaultCallbacks
 from ray.rllib.utils.annotations import override
 from ray.rllib.utils.typing import ModelConfigDict, TensorType
+from ray.rllib.utils.torch_utils import FLOAT_MIN
 from renesis.env_model.cppn import CPPN
 from renesis.utils.debug import enable_debugger
-import renesis.utils.debug as debug
-from renesis.utils.sys_debug import print_model_size
+from renesis.utils.debug import print_model_size
 from renesis.utils.media import create_video_subproc
 from renesis.sim import VXHistoryRenderer
+from launch.snapshot import get_snapshot
 from .gat import GAT, add_reflexive_edges
-from ray.rllib.utils.torch_utils import FLOAT_MIN
 
 t.set_printoptions(threshold=10000)
 
@@ -538,13 +539,13 @@ class CustomCallbacks(DefaultCallbacks):
         env = base_env.vector_env  # type: VoxcraftGrowthEnvironment
         episode.media["episode_data"]["rewards"] = env.all_rewards_history
         episode.media["episode_data"]["best_reward"] = env.best_reward
-        episode.media["episode_data"]["best_robot"] = env.best_finished_robot
+        episode.media["episode_data"]["best_robot"] = env.best_robot
         episode.media["episode_data"][
             "best_robot_sim_history"
-        ] = env.best_finished_robot_sim_history
+        ] = env.best_robot_sim_history
         episode.media["episode_data"][
             "best_robot_cppn_graphs"
-        ] = env.best_finished_robot_state_data
+        ] = env.best_robot_state_data
 
     def on_train_result(self, *, algorithm, result, trainer, **kwargs,) -> None:
         # Remove non-evaluation data
@@ -588,6 +589,8 @@ class DataLoggerCallback(LoggerCallback):
 
     def log_trial_start(self, trial):
         trial.init_logdir()
+        snapshot = get_snapshot()
+        shutil.move(snapshot, os.path.join(trial.logdir, "code"))
         self._trial_local_dir[trial] = os.path.join(trial.logdir, "data")
         os.makedirs(self._trial_local_dir[trial], exist_ok=True)
 

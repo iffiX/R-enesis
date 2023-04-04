@@ -200,8 +200,8 @@ class CustomCallbacks(DefaultCallbacks):
     def on_episode_end(self, *, worker, base_env, policies, episode, **kwargs):
         # Render the robot simulation
         env = base_env.vector_env  # type: VoxcraftGrowthEnvironment
-        robot = env.robots[0]
-        history = env.robot_sim_histories[0]
+        robot = env.previous_best_robots[0]
+        history = env.previous_best_sim_histories[0]
         episode.media["episode_data"]["robot"] = robot
         episode.media["episode_data"]["robot_sim_history"] = history
 

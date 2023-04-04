@@ -115,9 +115,9 @@ if __name__ == "__main__":
                     # best_i = i
                     should_save = True
                     best_reward = rewards[i]
-                    best_finished_robot = env.robots[i]
-                    best_finished_robot_sim_history = env.robot_sim_histories[i]
-                    best_finished_robot_state_data = env.state_data[i]
+                    best_finished_robot = env.previous_best_robots[i]
+                    best_finished_robot_sim_history = env.previous_best_sim_histories[i]
+                    best_finished_robot_state_data = env.previous_best_state_data[i]
             # for y in model_genomes[best_i]:
             #     print(y)
 

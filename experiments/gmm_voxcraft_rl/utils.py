@@ -1,11 +1,8 @@
 import os
 import shutil
 import pickle
-import graphviz
 import numpy as np
 import torch as t
-import pyvista as pv
-from PIL import Image
 from torch import nn
 from ray.tune.logger import LoggerCallback
 from ray.tune.result import TIMESTEPS_TOTAL, TRAINING_ITERATION
@@ -17,11 +14,34 @@ from ray.rllib.models.torch.attention_net import (
     GTrXLNet,
 )
 from ray.rllib.algorithms.callbacks import DefaultCallbacks
-from renesis.utils.plotter import Plotter
+from renesis.env.voxcraft import VoxcraftGMMEnvironment
+from renesis.utils.media import create_video_subproc
 from renesis.utils.debug import print_model_size
+from renesis.sim import Voxcraft, VXHistoryRenderer
 from launch.snapshot import get_snapshot
 
 t.set_printoptions(threshold=10000)
+
+
+def render(history):
+    try:
+        renderer = VXHistoryRenderer(history=history, width=640, height=480)
+        renderer.render()
+        frames = renderer.get_frames()
+        if frames.ndim == 4:
+            print("History saved")
+            return frames
+        else:
+            print("Rendering finished, but no frames produced")
+            print("History:")
+            print(history)
+            return None
+    except Exception as e:
+        print(e)
+        print("Exception occurred, no frames produced")
+        print("History:")
+        print(history)
+        return None
 
 
 class Actor(GTrXLNet, nn.Module):
@@ -80,9 +100,13 @@ class CustomCallbacks(DefaultCallbacks):
                 "after episode is done!"
             )
 
-        env = base_env.get_sub_environments()[env_index]
-        episode.media["episode_data"]["reward"] = env.get_reward()
-        episode.media["episode_data"]["voxels"] = env.env_model.voxels
+        env = base_env.vector_env  # type: VoxcraftGMMEnvironment
+        episode.media["episode_data"]["reward"] = env.previous_best_rewards[env_index]
+        episode.media["episode_data"]["robot"] = env.previous_best_robots[env_index]
+        # May be also record state data (gaussians) ?
+        # episode.media["episode_data"]["state_data"] = env.previous_best_state_data[
+        #     env_index
+        # ]
 
     def on_train_result(self, *, algorithm, result, trainer, **kwargs,) -> None:
         # Remove non-evaluation data
@@ -97,29 +121,28 @@ class CustomCallbacks(DefaultCallbacks):
                 # Aggregate results
                 rewards = []
                 best_reward = -np.inf
-                best_voxels = None
+                best_robot = None
                 for episode_data in data:
                     rewards.append(episode_data["reward"])
                     if episode_data["reward"] > best_reward:
                         best_reward = episode_data["reward"]
-                        best_voxels = episode_data["voxels"]
+                        best_robot = episode_data["robot"]
 
                 result["evaluation"]["episode_media"] = {
                     "episode_data": {
                         "rewards": rewards,
                         "best_reward": best_reward,
-                        "best_voxels": best_voxels,
+                        "best_robot": best_robot,
                     }
                 }
 
 
 class DataLoggerCallback(LoggerCallback):
-    def __init__(self, reference_shape, dimension_size, render=True):
+    def __init__(self, base_config_path):
         self._trial_continue = {}
         self._trial_local_dir = {}
-        self.reference_shape = reference_shape
-        self.dimension_size = dimension_size
-        self.render = render
+        with open(base_config_path, "r") as file:
+            self.base_config = file.read()
 
     def log_trial_start(self, trial):
         trial.init_logdir()
@@ -154,53 +177,38 @@ class DataLoggerCallback(LoggerCallback):
                     ]
                     pickle.dump(metrics, file)
 
-                if self.render:
-                    pv.global_theme.window_size = [1536, 768]
-                    plotter = Plotter()
-                    img = plotter.plot_voxel(
-                        data["best_voxels"], distance=3 * self.dimension_size
-                    )
-                    Image.fromarray(img, mode="RGB").save(
-                        os.path.join(
-                            self._trial_local_dir[trial],
-                            f"generated_it_{iteration}_rew_{data['best_reward']}.png",
-                        )
-                    )
+                robot = data["best_robot"]
+                simulator = Voxcraft()
+                _, (sim_history,) = simulator.run_sims([self.base_config], [robot])
+                frames = render(sim_history)
 
-                    img = plotter.plot_voxel_error(
-                        self.reference_shape,
-                        data["best_voxels"],
-                        distance=3 * self.dimension_size,
+                if frames is not None:
+                    path = os.path.join(
+                        self._trial_local_dir[trial],
+                        f"rendered_it_{iteration}_rew_{data['best_reward']}.gif",
                     )
-                    Image.fromarray(img, mode="RGB").save(
-                        os.path.join(
-                            self._trial_local_dir[trial], f"error_it_{iteration}.png"
-                        )
+                    print(f"Saving rendered results to {path}")
+                    wait = create_video_subproc(
+                        [f for f in frames],
+                        path=self._trial_local_dir[trial],
+                        filename=f"rendered_it_{iteration}",
+                        extension=".gif",
                     )
-                else:
-                    with open(
-                        os.path.join(
-                            self._trial_local_dir[trial],
-                            f"generated_data_it_{iteration}_rew_{data['best_reward']}.data",
-                        ),
-                        "wb",
-                    ) as file:
-                        pickle.dump(
-                            (
-                                self.reference_shape,
-                                data["best_voxels"],
-                                self.dimension_size,
-                                os.path.join(
-                                    self._trial_local_dir[trial],
-                                    f"generated_it_{iteration}_rew_{data['best_reward']}.png",
-                                ),
-                                os.path.join(
-                                    self._trial_local_dir[trial],
-                                    f"error_it_{iteration}.png",
-                                ),
-                            ),
-                            file,
-                        )
+                    path = os.path.join(
+                        self._trial_local_dir[trial],
+                        f"robot_it_{iteration}_rew_{data['best_reward']}.vxd",
+                    )
+                    with open(path, "w") as file:
+                        print(f"Saving robot to {path}")
+                        file.write(robot)
+                    path = os.path.join(
+                        self._trial_local_dir[trial],
+                        f"run_it_{iteration}_rew_{data['best_reward']}.history",
+                    )
+                    with open(path, "w") as file:
+                        print(f"Saving history to {path}")
+                        file.write(sim_history)
+                    wait()
 
             print("Saving completed")
 

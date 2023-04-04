@@ -6,7 +6,6 @@ from typing import List, Dict, Any, Optional
 from ray.rllib import VectorEnv
 from ray.rllib.utils import override
 from renesis.sim import Voxcraft
-from renesis.utils.debug import enable_debugger
 from renesis.utils.voxcraft import vxd_creator, get_voxel_positions
 from renesis.utils.fitness import max_z, table, distance_traveled, has_fallen
 from renesis.utils.debug import enable_debugger
@@ -15,6 +14,7 @@ from renesis.env_model.cppn import (
     CPPNBinaryTreeModel,
     CPPNBinaryTreeWithPhaseOffsetModel,
 )
+from renesis.env_model.gmm import GMMModel
 from renesis.env_model.growth import GrowthModel
 
 
@@ -35,15 +35,12 @@ class VoxcraftBaseEnvironment(VectorEnv):
         self.fallen_threshold = config["fallen_threshold"]
 
         self.previous_rewards = [0 for _ in range(config["num_envs"])]
-        self.robots = ["\n" for _ in range(config["num_envs"])]
-        self.robot_sim_histories = ["" for _ in range(config["num_envs"])]
-        self.state_data = [None for _ in range(config["num_envs"])]
+        self.previous_robots = ["\n" for _ in range(config["num_envs"])]
+        self.previous_state_data = [None for _ in range(config["num_envs"])]
 
-        self.all_rewards_history = []
-        self.best_reward = -np.inf
-        self.best_finished_robot = "\n"
-        self.best_finished_robot_sim_history = ""
-        self.best_finished_robot_state_data = None
+        self.previous_best_rewards = [0 for _ in range(config["num_envs"])]
+        self.previous_best_robots = ["\n" for _ in range(config["num_envs"])]
+        self.previous_best_state_data = [None for _ in range(config["num_envs"])]
 
         self.simulator = Voxcraft()
         super().__init__(self.observation_space, self.action_space, config["num_envs"])
@@ -52,11 +49,17 @@ class VoxcraftBaseEnvironment(VectorEnv):
     def reset_at(self, index: Optional[int] = None):
         if index is None:
             index = 0
+
         self.env_models[index].reset()
+
         self.previous_rewards[index] = 0
-        self.robots[index] = "\n"
-        self.robot_sim_histories[index] = ""
-        self.state_data[index] = None
+        self.previous_robots[index] = "\n"
+        self.previous_state_data[index] = None
+
+        self.previous_best_rewards[index] = 0
+        self.previous_best_robots[index] = "\n"
+        self.previous_best_state_data[index] = None
+
         return self.env_models[index].observe()
 
     @override(VectorEnv)
@@ -69,9 +72,10 @@ class VoxcraftBaseEnvironment(VectorEnv):
             model.reset()
 
         self.previous_rewards = [0 for _ in range(self.num_envs)]
-        self.robots = ["\n" for _ in range(self.num_envs)]
-        self.robot_sim_histories = ["" for _ in range(self.num_envs)]
-        self.state_data = [None for _ in range(self.num_envs)]
+        self.previous_best_rewards = [0 for _ in range(self.num_envs)]
+        self.previous_best_robots = ["\n" for _ in range(self.num_envs)]
+        self.previous_best_state_data = [None for _ in range(self.num_envs)]
+
         return [model.observe() for model in self.env_models]
 
     @override(VectorEnv)
@@ -84,20 +88,11 @@ class VoxcraftBaseEnvironment(VectorEnv):
         rewards = self.get_rewards(all_finished)
         # print(f"Rewards: {rewards}")
 
-        # for i, finish in enumerate(self.check_finished()):
-        #     if finish:
-        #         if rewards[i] > self.best_reward:
-        #             self.best_reward = rewards[i]
-        #             self.best_finished_robot = self.robots[i]
-        #             self.best_finished_robot_sim_history = self.robot_sim_histories[i]
-        #             self.best_finished_robot_state_data = self.state_data[i]
-
         for i in range(self.num_envs):
-            if rewards[i] > self.best_reward:
-                self.best_reward = rewards[i]
-                self.best_finished_robot = self.robots[i]
-                self.best_finished_robot_sim_history = self.robot_sim_histories[i]
-                self.best_finished_robot_state_data = self.state_data[i]
+            if rewards[i] > self.previous_best_rewards[i]:
+                self.previous_best_rewards[i] = rewards[i]
+                self.previous_best_robots[i] = self.previous_robots[i]
+                self.previous_best_state_data[i] = self.previous_state_data[i]
 
         reward_diffs = [
             reward - previous_reward
@@ -105,9 +100,6 @@ class VoxcraftBaseEnvironment(VectorEnv):
         ]
         self.previous_rewards = rewards
 
-        self.all_rewards_history.append(rewards)
-        if len(self.all_rewards_history) > self.max_steps:
-            self.all_rewards_history = self.all_rewards_history[-self.max_steps :]
         # print(f"Actions: \n {actions}")
         # print(f"Rewards: {self.previous_rewards}")
         # print(f"Finished: {self.check_finished()}")
@@ -135,10 +127,18 @@ class VoxcraftBaseEnvironment(VectorEnv):
         rewards = copy.deepcopy(self.previous_rewards)
         valid_models = []
         valid_model_indices = []
+        empty_count = 0
         for idx, (model, finished) in enumerate(zip(self.env_models, all_finished)):
             if not model.is_robot_empty() and not finished:
                 valid_models.append(model)
                 valid_model_indices.append(idx)
+
+            if model.is_robot_empty() and not finished:
+                empty_count += 1
+                rewards[idx] = 0
+                self.previous_robots[idx] = "\n"
+                self.previous_state_data[idx] = None
+        print(f"Empty count: {empty_count}")
 
         robots, (results, records) = self.run_simulations(valid_models)
         for robot, result, record, model, idx in zip(
@@ -150,11 +150,9 @@ class VoxcraftBaseEnvironment(VectorEnv):
             reward = self.compute_reward_from_sim_result(
                 initial_positions, final_positions
             )
-            rewards[idx] = reward
 
-            self.robots[idx] = robot
-            self.robot_sim_histories[idx] = record
-            self.state_data[idx] = model.get_state_data()
+            self.previous_robots[idx] = robot
+            self.previous_state_data[idx] = model.get_state_data()
         return rewards
 
     def run_simulations(self, env_models):
@@ -162,8 +160,10 @@ class VoxcraftBaseEnvironment(VectorEnv):
         Run a simulation using current representation.
 
         Returns:
-            Path to the output.xml file.
-            Path to the temporary directory (needs to be deleted).
+            A list of robots (each robot is a VXD file in string).
+            A tuple, first member is a list of simulation summary
+            result string, the second member is a list of simulation
+            recording string.
         """
         robots = []
         for model in env_models:
@@ -174,6 +174,7 @@ class VoxcraftBaseEnvironment(VectorEnv):
         for attempt in range(3):
             try:
                 out = self.simulator.run_sims([self.base_config] * len(robots), robots)
+                # out = ([None] * len(robots), [None] * len(robots))
                 end = time()
             except Exception as e:
                 print(f"Failed attempt {attempt + 1}")
@@ -189,14 +190,16 @@ class VoxcraftBaseEnvironment(VectorEnv):
                             file.write(robot)
                     raise e
             else:
-                break
-        print(
-            f"{len(robots)} simulations total {end - begin:.3f}s, "
-            f"average {(end - begin) / len(robots):.3f}s"
-        )
-        return robots, out
+                print(
+                    f"{len(robots)} simulations total {end - begin:.3f}s, "
+                    f"average {(end - begin) / len(robots):.3f}s"
+                )
+                return robots, out
 
     def compute_reward_from_sim_result(self, initial_positions, final_positions):
+        """
+        Note: Reward should always have an initial value of 0 for empty robots.
+        """
         if self.reward_type == "max_z":
             if has_fallen(initial_positions, final_positions, self.fallen_threshold):
                 reward = 0
@@ -229,9 +232,6 @@ class VoxcraftBaseEnvironment(VectorEnv):
 
 
 class VoxcraftGrowthEnvironment(VoxcraftBaseEnvironment):
-
-    metadata = {"render.modes": ["ansi"]}
-
     def __init__(self, config):
         if config.get("debug", False):
             enable_debugger(config["debug_ip"], config["debug_port"])
@@ -251,9 +251,6 @@ class VoxcraftGrowthEnvironment(VoxcraftBaseEnvironment):
 
 
 class VoxcraftCPPNBinaryTreeEnvironment(VoxcraftBaseEnvironment):
-
-    metadata = {"render.modes": ["ansi"]}
-
     def __init__(self, config):
         self.initial_max_random_steps = config.get("initial_max_random_steps", 0)
         if config.get("debug", False):
@@ -267,30 +264,6 @@ class VoxcraftCPPNBinaryTreeEnvironment(VoxcraftBaseEnvironment):
         ]
         super().__init__(config, env_models)
 
-    # @override(VectorEnv)
-    # def reset_at(self, index: Optional[int] = None):
-    #     if index is None:
-    #         index = 0
-    #     self.env_models[index].reset(
-    #         np.random.randint(0, self.initial_max_random_steps + 1)
-    #     )
-    #     self.previous_rewards[index] = 0
-    #     self.robots[index] = "\n"
-    #     self.robot_sim_histories[index] = ""
-    #     self.state_data[index] = None
-    #     return self.env_models[index].observe()
-    #
-    # @override(VectorEnv)
-    # def vector_reset(self):
-    #     for model in self.env_models:
-    #         model.reset(np.random.randint(0, self.initial_max_random_steps + 1))
-    #
-    #     self.previous_rewards = [0 for _ in range(self.num_envs)]
-    #     self.robots = ["\n" for _ in range(self.num_envs)]
-    #     self.robot_sim_histories = ["" for _ in range(self.num_envs)]
-    #     self.state_data = [None for _ in range(self.num_envs)]
-    #     return [model.observe() for model in self.env_models]
-
     # def get_rewards(self, all_finished):
     #     base_rewards = super().get_rewards(all_finished)
     #     for idx, model in enumerate(self.env_models):
@@ -299,9 +272,6 @@ class VoxcraftCPPNBinaryTreeEnvironment(VoxcraftBaseEnvironment):
 
 
 class VoxcraftCPPNBinaryTreeWithPhaseOffsetEnvironment(VoxcraftBaseEnvironment):
-
-    metadata = {"render.modes": ["ansi"]}
-
     def __init__(self, config):
         self.initial_max_random_steps = config.get("initial_max_random_steps", 0)
         if config.get("debug", False):
@@ -315,26 +285,28 @@ class VoxcraftCPPNBinaryTreeWithPhaseOffsetEnvironment(VoxcraftBaseEnvironment):
         ]
         super().__init__(config, env_models)
 
-    # @override(VectorEnv)
-    # def reset_at(self, index: Optional[int] = None):
-    #     if index is None:
-    #         index = 0
-    #     self.env_models[index].reset(
-    #         np.random.randint(0, self.initial_max_random_steps + 1)
-    #     )
-    #     self.previous_rewards[index] = 0
-    #     self.robots[index] = "\n"
-    #     self.robot_sim_histories[index] = ""
-    #     self.state_data[index] = None
-    #     return self.env_models[index].observe()
-    #
-    # @override(VectorEnv)
-    # def vector_reset(self):
-    #     for model in self.env_models:
-    #         model.reset(np.random.randint(0, self.initial_max_random_steps + 1))
-    #
-    #     self.previous_rewards = [0 for _ in range(self.num_envs)]
-    #     self.robots = ["\n" for _ in range(self.num_envs)]
-    #     self.robot_sim_histories = ["" for _ in range(self.num_envs)]
-    #     self.state_data = [None for _ in range(self.num_envs)]
-    #     return [model.observe() for model in self.env_models]
+    # def get_rewards(self, all_finished):
+    #     base_rewards = super().get_rewards(all_finished)
+    #     for idx, model in enumerate(self.env_models):
+    #         base_rewards[idx] += model.get_cppn_reward()
+    #     return base_rewards
+
+
+class VoxcraftGMMEnvironment(VoxcraftBaseEnvironment):
+    def __init__(self, config):
+        if config.get("debug", False):
+            enable_debugger(config["debug_ip"], config["debug_port"])
+        env_models = [
+            GMMModel(
+                materials=config["materials"],
+                dimension_size=config["dimension_size"],
+                max_gaussian_num=config["max_gaussian_num"],
+            )
+            for _ in range(config["num_envs"])
+        ]
+        super().__init__(config, env_models)
+
+    def vector_step(self, actions):
+        return super().vector_step(
+            [(np.clip(action, -2, 2) + 2) / 4 for action in actions]
+        )

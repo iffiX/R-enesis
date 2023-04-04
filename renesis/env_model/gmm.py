@@ -3,7 +3,6 @@ import numpy as np
 from typing import List
 from gym.spaces import Box
 from scipy.stats import multivariate_normal
-from renesis.utils.debug import enable_debugger
 from .base import BaseModel
 
 
@@ -165,7 +164,10 @@ class GMMModel(BaseModel):
             # all_values shape [coord_num, gaussian_num]
             all_values = np.stack(all_values, axis=1)
             material_map = np.array(
-                [self.materials[np.argmax(gaussian[6:])] for gaussian in self.gaussians]
+                [
+                    self.materials[int(np.argmax(gaussian[6:]))]
+                    for gaussian in self.gaussians
+                ]
             )
             material = np.where(
                 np.any(all_values > 0, axis=1),

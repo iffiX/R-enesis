@@ -8,6 +8,7 @@ numpy==1.23.4
 Pillow==9.2.0
 ray[rllib]==2.0.1
 scipy==1.9.3
+scikit-learn
 torch~=1.11.0
 tqdm
 pandas~=1.5.1
@@ -21,4 +22,3 @@ requests~=2.28.1
 setuptools~=57.0.0
 vtk~=9.2.2
 psutil~=5.9.3
-machin~=0.4.2

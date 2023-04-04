@@ -7,7 +7,7 @@ from ray.tune.logger import TBXLoggerCallback
 from ray.rllib.agents.ppo import PPOTrainer
 from renesis.env_model.cppn import CPPNBaseModel
 from renesis.env.virtual_shape import VirtualShapeCPPNEnvironment
-from experiments.cppn_virtual_shape_evolution.utils import generate_3d_shape
+from renesis.utils.virtual_shape import generate_3d_shape
 from experiments.cppn_virtual_shape_rl.utils import *
 
 # from experiments.cppn_virtual_shape_rl.utils import (

@@ -28,7 +28,7 @@ from ray.rllib.utils.typing import ModelConfigDict, TensorType
 from renesis.env_model.cppn import CPPN
 from renesis.utils.debug import enable_debugger
 import renesis.utils.debug as debug
-from renesis.utils.sys_debug import print_model_size
+from renesis.utils.debug import print_model_size
 from renesis.utils.media import create_video_subproc
 from renesis.sim import VXHistoryRenderer
 from .gat import GAT, add_reflexive_edges
@@ -540,13 +540,13 @@ class CustomCallbacks(DefaultCallbacks):
         env = base_env.vector_env  # type: VoxcraftGrowthEnvironment
         episode.media["episode_data"]["rewards"] = env.all_rewards_history
         episode.media["episode_data"]["best_reward"] = env.best_reward
-        episode.media["episode_data"]["best_robot"] = env.best_finished_robot
+        episode.media["episode_data"]["best_robot"] = env.best_robot
         episode.media["episode_data"][
             "best_robot_sim_history"
-        ] = env.best_finished_robot_sim_history
+        ] = env.best_robot_sim_history
         episode.media["episode_data"][
             "best_robot_cppn_graphs"
-        ] = env.best_finished_robot_state_data
+        ] = env.best_robot_state_data
 
     def on_train_result(self, *, algorithm, result, trainer, **kwargs,) -> None:
         # Remove non-evaluation data

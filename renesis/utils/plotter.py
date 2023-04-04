@@ -161,7 +161,7 @@ class Plotter:
         plotter = pv.Plotter(off_screen=not self.interactive, shape=(1, 3))
 
         plotter.subplot(0, 0)
-        plotter.add_text("Reference", font_size=10)
+        plotter.add_text("Target", font_size=10)
         self.plot_voxel(
             *self.voxel_array_to_origin_and_material(voxel_ref),
             palette=palette,
@@ -170,7 +170,7 @@ class Plotter:
         )
 
         plotter.subplot(0, 1)
-        plotter.add_text("Input", font_size=10)
+        plotter.add_text("Optimized", font_size=10)
         self.plot_voxel(
             *self.voxel_array_to_origin_and_material(voxel_input),
             palette=palette,
@@ -197,7 +197,7 @@ class Plotter:
             annotations={1: "missing", 2: "excess", 3: "wrong"},
             cmap=["purple", "blue", "orange"],
             clim=[1, 3],
-            opacity=0.9,
+            opacity=0.7,
         )
         # Plot reference edge frame
         ref_origins, ref_materials = self.voxel_array_to_origin_and_material(voxel_ref)
@@ -255,7 +255,7 @@ class Plotter:
             plotter = pv.Plotter(off_screen=not self.interactive, shape=(1, 4))
 
             plotter.subplot(0, 0)
-            plotter.add_text("Reference", font_size=10)
+            plotter.add_text("Target", font_size=10)
             self.plot_voxel(
                 *self.voxel_array_to_origin_and_material(voxel_ref),
                 palette=palette,
@@ -264,7 +264,7 @@ class Plotter:
             )
 
             plotter.subplot(0, 1)
-            plotter.add_text(f"Input-{idx}", font_size=10)
+            plotter.add_text(f"Optimized-{idx}", font_size=10)
             self.plot_voxel(
                 *self.voxel_array_to_origin_and_material(voxel_input),
                 palette=palette,
@@ -297,7 +297,7 @@ class Plotter:
                 annotations={1: "missing", 2: "excess", 3: "wrong"},
                 cmap=["purple", "blue", "orange"],
                 clim=[1, 3],
-                opacity=0.9,
+                opacity=0.7,
             )
             # Plot reference edge frame
             ref_origins, ref_materials = self.voxel_array_to_origin_and_material(

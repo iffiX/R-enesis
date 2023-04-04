@@ -29,13 +29,25 @@ if __name__ == "__main__":
 
     # Launch python process from the snapshot dir
     command = [sys.executable] + sys.argv[1:]
-    process = subprocess.Popen(
-        command, cwd=snapshot_dir, env=os.environ.update({"PYTHONPATH": snapshot_dir})
-    )
-    code = process.wait()
-    print(f"Launch exited with code {code}")
-    if code != 0:
-        print(f"Inspect temp code directory {snapshot_dir}")
-    else:
+
+    process = None
+    try:
+        process = subprocess.Popen(
+            command,
+            cwd=snapshot_dir,
+            env=os.environ.update({"PYTHONPATH": snapshot_dir}),
+            start_new_session=True,
+        )
+        code = process.wait()
+        print(f"Launch exited with code {code}")
+        if code != 0:
+            print(f"Inspect temp code directory {snapshot_dir}")
+        else:
+            print(f"Removing temp code directory {snapshot_dir}")
+            shutil.rmtree(snapshot_dir)
+    except KeyboardInterrupt:
+        if process is not None:
+            print("Keyboard interrupt received, killing instance")
+            process.kill()
         print(f"Removing temp code directory {snapshot_dir}")
         shutil.rmtree(snapshot_dir)

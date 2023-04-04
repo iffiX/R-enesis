@@ -1,6 +1,6 @@
 import gym
 import numpy as np
-from gym.spaces import Box
+from sklearn.metrics import precision_score, recall_score, f1_score
 from renesis.utils.plotter import Plotter
 from renesis.env_model.cppn import CPPNVirtualShapeBinaryTreeModel
 from renesis.env_model.gmm import GMMModel
@@ -10,65 +10,139 @@ def sigmoid(x):
     return 1 / (1 + np.exp(-x))
 
 
-class VirtualShapeCPPNEnvironment(gym.Env):
+def clip(x):
+    return (np.clip(x, -2, 2) + 2) / 4
 
+
+normalize = clip
+
+
+class VirtualShapeBaseEnvironment(gym.Env):
     metadata = {"render.modes": ["rgb_array"]}
 
-    def __init__(self, config):
+    def __init__(self, config, env_model, materials):
         self.plotter = Plotter()
-        self.env_model = CPPNVirtualShapeBinaryTreeModel(
-            dimension_size=config["dimension_size"],
-            cppn_hidden_node_num=config["cppn_hidden_node_num"],
-        )
+        self.env_model = env_model
+        self.materials = materials
         self.reference_shape = config["reference_shape"]
         self.max_steps = config["max_steps"]
         self.action_space = self.env_model.action_space
         self.observation_space = self.env_model.observation_space
-        self.previous_reward = 0
         self.reward_range = (0, float("inf"))
         self.reward_type = config["reward_type"]
         self.render_config = config.get(
             "render_config", {"distance": config["dimension_size"] * 2}
         )
+        self.previous_reward = self.get_reward()
         self.best_reward = 0
-        # self.actions = []
 
     def reset(self, **kwargs):
         self.env_model.reset()
-        self.previous_reward = 0
-        # str = "Actions:\n"
-        # for act in self.actions:
-        #     str += f"{act}\n"
-        # print(str)
+        self.previous_reward = self.get_reward()
         return self.env_model.observe()
 
     def step(self, action):
-        self.env_model.step(action)
+        self.env_model.step(normalize(action))
         reward = self.get_reward()
         reward_diff = reward - self.previous_reward
         self.previous_reward = reward
 
         done = self.env_model.is_finished() or (self.env_model.steps == self.max_steps)
-        # print(f"Step {self.env_model.steps}: reward {reward} action {action}")
-        # print(reward_diff)
-        # self.actions.append(action)
-        return self.env_model.observe(), reward_diff, done, {}
+        return (
+            self.env_model.observe(),
+            reward_diff,
+            done,
+            {},
+        )
 
     def get_reward(self):
-        if self.reward_type == "correct_rate":
-            reward = (
-                10
-                * np.sum(
-                    np.logical_and(
-                        self.reference_shape != 0,
-                        self.env_model.voxels == self.reference_shape,
-                    )
+        """
+        if not start with "multi_":
+        recall, precision, f1: Treat the problem as a binary classification problem.
+
+        first we only consider non zero voxels, then we treat it as a binary
+        classification problem. Non zero voxels placed correctly are counted as
+        true positives. Non zero voxels in the reference shape but placed
+        incorrectly are false negatives. Non zero voxels in the input shape but
+        not in the reference shape or is placed incorrectly in the reference shape
+        are true negatives.
+
+
+        if starts with "multi_"
+        multi_recall, multi_precision, multi_f1: Treats the problem as a multi
+            classification problem. Returns the weighted score.
+        """
+        reward = None
+        if not self.reward_type.startswith("multi_"):
+            correct_num = np.sum(
+                np.logical_and(
+                    self.reference_shape != 0,
+                    self.env_model.voxels == self.reference_shape,
                 )
-                / np.sum(self.reference_shape != 0)
             )
+            if self.reward_type == "recall":
+                reward = 10 * correct_num / (np.sum(self.reference_shape != 0) + 1e-3)
+            elif self.reward_type == "precision":
+                reward = 10 * correct_num / (np.sum(self.env_model.voxels != 0) + 1e-3)
+            elif self.reward_type == "f1":
+                recall = correct_num / (np.sum(self.reference_shape != 0) + 1e-3)
+                precision = correct_num / (np.sum(self.env_model.voxels != 0) + 1e-3)
+                reward = 20 * precision * recall / (precision + recall + 1e-3)
         else:
+            if self.env_model.is_robot_empty():
+                reward = 0
+            else:
+                occurences = [
+                    np.sum(self.reference_shape == mat) for mat in self.materials
+                ]
+                # Test notes:
+                # use 1/occurrence is too small for voxels with large quantities
+                weights = np.array(
+                    [occurrence if occurrence > 0 else 0 for occurrence in occurences]
+                )
+                if self.reward_type == "multi_recall":
+                    scores = recall_score(
+                        self.reference_shape.reshape(-1),
+                        self.env_model.voxels.reshape(-1),
+                        labels=self.env_model.materials,
+                        average=None,
+                        zero_division=0,
+                    )
+                    reward = 10 * np.average(scores, weights=weights)
+                elif self.reward_type == "multi_precision":
+                    scores = precision_score(
+                        self.reference_shape.reshape(-1),
+                        self.env_model.voxels.reshape(-1),
+                        labels=self.env_model.materials,
+                        average=None,
+                        zero_division=0,
+                    )
+                    reward = 10 * np.average(scores, weights=weights)
+                elif self.reward_type == "multi_f1":
+                    scores = f1_score(
+                        self.reference_shape.reshape(-1),
+                        self.env_model.voxels.reshape(-1),
+                        labels=self.env_model.materials,
+                        average=None,
+                        zero_division=0,
+                    )
+                    reward = 10 * np.average(scores, weights=weights)
+
+        if reward is None:
             raise Exception(f"Unknown reward type: {self.reward_type}")
         return reward
+
+    def render(self, mode="rgb_array"):
+        raise NotImplementedError()
+
+
+class VirtualShapeCPPNEnvironment(VirtualShapeBaseEnvironment):
+    def __init__(self, config):
+        env_model = CPPNVirtualShapeBinaryTreeModel(
+            dimension_size=config["dimension_size"],
+            cppn_hidden_node_num=config["cppn_hidden_node_num"],
+        )
+        super().__init__(config, env_model, (0, 1, 2, 3))
 
     def render(self, mode="rgb_array"):
         if mode == "rgb_array":
@@ -80,80 +154,14 @@ class VirtualShapeCPPNEnvironment(gym.Env):
             return img
 
 
-class VirtualShapeGMMEnvironment(gym.Env):
-
-    metadata = {"render.modes": ["rgb_array"]}
-
+class VirtualShapeGMMEnvironment(VirtualShapeBaseEnvironment):
     def __init__(self, config):
-        self.plotter = Plotter()
-        self.env_model = GMMModel(
+        env_model = GMMModel(
             materials=config["materials"],
             dimension_size=config["dimension_size"],
             max_gaussian_num=config["max_gaussian_num"],
         )
-        self.reference_shape = config["reference_shape"]
-        self.max_steps = config["max_steps"]
-        self.action_space = self.env_model.action_space
-        self.observation_space = self.env_model.observation_space
-        # self.observation_space = Box(low=0, high=1, shape=(8,))
-        self.reward_range = (0, float("inf"))
-        self.reward_type = config["reward_type"]
-        self.render_config = config.get(
-            "render_config", {"distance": config["dimension_size"] * 2}
-        )
-        self.previous_reward = self.get_reward()
-        self.best_reward = 0
-        # self.actions = []
-
-    def reset(self, **kwargs):
-        self.env_model.reset()
-        self.previous_reward = self.get_reward()
-        # str = "Actions:\n"
-        # for act in self.actions:
-        #     str += f"{act}\n"
-        # print(str)
-        # return np.concatenate(
-        #     (self.env_model.observe(), np.array([self.previous_reward / 10]))
-        # )
-        return self.env_model.observe()
-
-    def step(self, action):
-        # self.env_model.step(sigmoid(action))
-        self.env_model.step((np.clip(action, -2, 2) + 2) / 4)
-        reward = self.get_reward()
-        reward_diff = reward - self.previous_reward
-        self.previous_reward = reward
-
-        done = self.env_model.is_finished() or (self.env_model.steps == self.max_steps)
-        # print(f"Step {self.env_model.steps}: reward {reward} action {action}")
-        # print(reward_diff)
-        # self.actions.append(action)
-        return (
-            # np.concatenate((self.env_model.observe(), np.array([reward / 10]))),
-            self.env_model.observe(),
-            reward_diff,
-            done,
-            {},
-        )
-
-    def get_reward(self):
-        correct_num = np.sum(
-            np.logical_and(
-                self.reference_shape != 0,
-                self.env_model.voxels == self.reference_shape,
-            )
-        )
-        if self.reward_type == "recall":
-            reward = 10 * correct_num / (np.sum(self.reference_shape != 0) + 1e-3)
-        elif self.reward_type == "precision":
-            reward = 10 * correct_num / (np.sum(self.env_model.voxels != 0) + 1e-3)
-        elif self.reward_type == "f1":
-            recall = correct_num / (np.sum(self.reference_shape != 0) + 1e-3)
-            precision = correct_num / (np.sum(self.env_model.voxels != 0) + 1e-3)
-            reward = 20 * precision * recall / (precision + recall + 1e-3)
-        else:
-            raise Exception(f"Unknown reward type: {self.reward_type}")
-        return reward
+        super().__init__(config, env_model, env_model.materials)
 
     def render(self, mode="rgb_array"):
         if mode == "rgb_array":

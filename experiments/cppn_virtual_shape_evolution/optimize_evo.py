@@ -8,8 +8,7 @@ from PIL import Image
 from renesis.env_model.cppn import CPPN, CPPNBinaryTreeModel
 from renesis.env.virtual_shape import VirtualShapeCPPNEnvironment
 from renesis.utils.plotter import Plotter
-from renesis.sim import VXHistoryRenderer
-from experiments.cppn_virtual_shape_evolution.utils import generate_3d_shape
+from renesis.utils.virtual_shape import generate_3d_shape
 
 TRIALS = 10
 GENOME_SIZE = 100

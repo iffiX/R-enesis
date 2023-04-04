@@ -1,19 +1,12 @@
-import os
 import ray
-import argparse
-import numpy as np
-from PIL import Image
-from ray import tune
-from ray.tune.logger import TBXLoggerCallback
-from ray.rllib.algorithms.algorithm import Algorithm
 from ray.rllib.algorithms.ppo import PPO
-from renesis.utils.plotter import Plotter
 from renesis.utils.media import create_video_subproc
-from renesis.env.virtual_shape import VirtualShapeGMMEnvironment, sigmoid
-from experiments.cppn_virtual_shape_evolution.utils import (
+from renesis.env.virtual_shape import VirtualShapeGMMEnvironment, normalize
+from renesis.utils.virtual_shape import (
     generate_3d_shape,
     generate_sphere,
     generate_random_ellipsoids,
+    generate_inversed_random_ellipsoids,
     generate_cross,
 )
 from experiments.gmm_virtual_shape_rl.utils import *
@@ -21,18 +14,23 @@ from experiments.gmm_virtual_shape_rl.utils import *
 from renesis.utils.debug import enable_debugger
 
 dimension = 10
+iters = 400
 steps = 20
+workers = 1
+envs = 5
+rollout = 20
 # reference_shape = generate_sphere(dimension)
 # reference_shape = generate_3d_shape(
 #     10, 200, change_material_when_same_minor_prob=0.2, fill_num=(3,)
 # )
-# reference_shape = generate_random_ellipsoids(dimension, num=steps // 2)
-reference_shape = generate_cross(dimension)
+# reference_shape = generate_random_ellipsoids(dimension, materials=(1, 2, 3), num=10)
+reference_shape = generate_inversed_random_ellipsoids(dimension, material=1, num=10)
+# reference_shape = generate_cross(dimension)
 config = {
     "env": VirtualShapeGMMEnvironment,
     "env_config": {
         "dimension_size": dimension,
-        "materials": (0, 1, 2, 3),
+        "materials": (0, 1),
         "max_gaussian_num": 100,
         "max_steps": steps,
         "reference_shape": reference_shape,
@@ -42,15 +40,16 @@ config = {
     "normalize_actions": False,
     "disable_env_checking": True,
     "render_env": False,
-    "sgd_minibatch_size": 128,
-    "num_sgd_iter": 15,
-    "train_batch_size": steps * 5 * 128,
+    "sgd_minibatch_size": 512,
+    "num_sgd_iter": 30,
+    "train_batch_size": steps * workers * envs * rollout,
     "lr": 1e-4,
-    "rollout_fragment_length": steps * 5,
+    "rollout_fragment_length": steps * envs * rollout,
     "vf_clip_param": 10 ** 5,
     "seed": 132434,
-    "num_workers": 1,
-    "num_envs_per_worker": 1,
+    "num_workers": workers,
+    "num_gpus": 1,
+    "num_envs_per_worker": envs,
     "num_cpus_per_worker": 1,
     "framework": "torch",
     # Set up a separate evaluation worker set for the
@@ -63,9 +62,9 @@ config = {
         "max_seq_len": steps,
         "custom_model_config": {
             "num_transformer_units": 1,
-            "attention_dim": 16,
-            "head_dim": 16,
-            "position_wise_mlp_dim": 16,
+            "attention_dim": 32,
+            "head_dim": 32,
+            "position_wise_mlp_dim": 32,
             "memory_inference": steps,
             "memory_training": steps,
             "num_heads": 1,
@@ -80,9 +79,7 @@ if __name__ == "__main__":
     ray.init(_memory=1 * (10 ** 9), object_store_memory=10 ** 9, num_gpus=0)
 
     algo = PPO(config=config)
-    algo.restore(
-        "/home/iffi/ray_results/PPO_2023-03-28_00-11-24/PPO_VirtualShapeGMMEnvironment_fc689_00000_0_2023-03-28_00-11-24/checkpoint_000145"
-    )
+    algo.restore("/home/iffi/data2/checkpoint_000380")
 
     # Create the env to do inference in.
     env = VirtualShapeGMMEnvironment(config["env_config"])
@@ -113,7 +110,7 @@ if __name__ == "__main__":
         # Send the computed action `a` to the env.
         obs, reward, done, _ = env.step(a)
         # print(a)
-        print(env.env_model.scale(sigmoid(a)))
+        print(env.env_model.scale(normalize(a)))
         episode_reward += reward
 
         state = [
@@ -127,14 +124,13 @@ if __name__ == "__main__":
         reference_shape, voxel_inputs, distance=dimension * 3
     )
     wait = create_video_subproc(
-        imgs, path="./", filename=f"steps", fps=1, extension=".mp4",
+        imgs,
+        path="./",
+        filename=f"steps_rew={episode_reward}",
+        fps=1,
+        extension=".mp4",
     )
     wait()
-    # img = plotter.plot_voxel_error(
-    #     reference_shape, env.env_model.voxels, distance=dimension * 3
-    # )
-    # Image.fromarray(img, mode="RGB").save(f"error.png")
-    print(episode_reward)
     algo.stop()
 
     ray.shutdown()
