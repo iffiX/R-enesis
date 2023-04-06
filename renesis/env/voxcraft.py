@@ -14,12 +14,11 @@ from renesis.env_model.cppn import (
     CPPNBinaryTreeModel,
     CPPNBinaryTreeWithPhaseOffsetModel,
 )
-from renesis.env_model.gmm import GMMModel
+from renesis.env_model.gmm import GMMModel, GMMObserveSeqModel, normalize
 from renesis.env_model.growth import GrowthModel
 
 
 class VoxcraftBaseEnvironment(VectorEnv):
-
     metadata = {"render.modes": ["ansi"]}
 
     def __init__(self, config: Dict[str, Any], env_models: List[BaseModel]):
@@ -150,7 +149,7 @@ class VoxcraftBaseEnvironment(VectorEnv):
             reward = self.compute_reward_from_sim_result(
                 initial_positions, final_positions
             )
-
+            rewards[idx] = reward
             self.previous_robots[idx] = robot
             self.previous_state_data[idx] = model.get_state_data()
         return rewards
@@ -307,6 +306,19 @@ class VoxcraftGMMEnvironment(VoxcraftBaseEnvironment):
         super().__init__(config, env_models)
 
     def vector_step(self, actions):
-        return super().vector_step(
-            [(np.clip(action, -2, 2) + 2) / 4 for action in actions]
-        )
+        return super().vector_step([normalize(action) for action in actions])
+
+
+class VoxcraftGMMObserveSeqEnvironment(VoxcraftGMMEnvironment):
+    def __init__(self, config):
+        if config.get("debug", False):
+            enable_debugger(config["debug_ip"], config["debug_port"])
+        env_models = [
+            GMMObserveSeqModel(
+                materials=config["materials"],
+                dimension_size=config["dimension_size"],
+                max_gaussian_num=config["max_gaussian_num"],
+            )
+            for _ in range(config["num_envs"])
+        ]
+        super(VoxcraftGMMEnvironment, self).__init__(config, env_models)

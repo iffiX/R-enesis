@@ -1,7 +1,8 @@
 import cc3d
 import numpy as np
 from typing import List
-from gym.spaces import Box
+from collections import OrderedDict
+from gym.spaces import Box, Dict
 from scipy.stats import multivariate_normal
 from .base import BaseModel
 
@@ -13,9 +14,24 @@ def is_voxel_continuous(occupied: np.ndarray):
     return label_num <= 1
 
 
+def sigmoid(x):
+    return 1 / (1 + np.exp(-x))
+
+
+def clip(x):
+    return (np.clip(x, -2, 2) + 2) / 4
+
+
+normalize = clip
+
+
 class GMMModel(BaseModel):
     def __init__(
-        self, materials=(0, 1, 2), dimension_size=20, max_gaussian_num=100, cutoff=1e-2,
+        self,
+        materials=(0, 1, 2),
+        dimension_size=20,
+        max_gaussian_num=100,
+        cutoff=1e-2,
     ):
         """
         Tail bound from
@@ -158,7 +174,10 @@ class GMMModel(BaseModel):
             values = np.where(values > np.max(values) * self.cutoff, values, 0)
             all_values.append(values)
 
-        self.voxels = np.zeros([self.dimension_size] * 3, dtype=float,)
+        self.voxels = np.zeros(
+            [self.dimension_size] * 3,
+            dtype=float,
+        )
 
         if self.gaussians:
             # all_values shape [coord_num, gaussian_num]
@@ -192,3 +211,83 @@ class GMMModel(BaseModel):
             self.voxels = np.zeros_like(self.voxels)
             self.occupied = np.zeros_like(self.occupied)
             self.num_non_zero_voxel = 0
+
+
+class GMMObserveSeqModel(GMMModel):
+    def __init__(
+        self,
+        materials=(0, 1, 2),
+        dimension_size=20,
+        max_gaussian_num=100,
+        cutoff=1e-2,
+    ):
+        self.all_past_voxels = None
+        super().__init__(materials, dimension_size, max_gaussian_num, cutoff)
+
+    @property
+    def observation_space(self):
+        return Dict(
+            OrderedDict(
+                [
+                    (
+                        "gaussians",
+                        Box(
+                            low=0,
+                            high=1,
+                            shape=(
+                                self.max_gaussian_num,
+                                6 + len(self.materials),
+                            ),
+                        ),
+                    ),
+                    (
+                        "gaussian_num",
+                        Box(low=0, high=self.max_gaussian_num, dtype=int, shape=(1,)),
+                    ),
+                    (
+                        "all_past_voxels",
+                        Box(
+                            low=0,
+                            high=1,
+                            shape=(self.max_gaussian_num,)
+                            + (self.dimension_size,) * 3
+                            + (len(self.materials),),
+                        ),
+                    ),
+                ]
+            )
+        )
+
+    def reset(self, initial_steps=0):
+        super().reset(initial_steps)
+        self.all_past_voxels = []
+
+    def step(self, action: np.ndarray):
+        super().step(action)
+        self.all_past_voxels.append(
+            np.stack([self.voxels == mat for mat in self.materials], axis=-1)
+        )
+
+    def observe(self):
+        gaussians = np.zeros(
+            (self.max_gaussian_num, 6 + len(self.materials)), dtype=np.float32
+        )
+        all_past_voxels = np.zeros(
+            (self.max_gaussian_num,)
+            + (self.dimension_size,) * 3
+            + (len(self.materials),),
+            dtype=np.float32,
+        )
+        if self.gaussians:
+            gaussians[-len(self.gaussians) :] = self.gaussians
+            all_past_voxels[-len(self.gaussians) :] = self.all_past_voxels
+        return OrderedDict(
+            [
+                ("gaussians", gaussians),
+                ("gaussian_num", np.array((len(self.gaussians),))),
+                (
+                    "all_past_voxels",
+                    all_past_voxels,
+                ),
+            ]
+        )

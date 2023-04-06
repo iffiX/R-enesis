@@ -3,18 +3,7 @@ import numpy as np
 from sklearn.metrics import precision_score, recall_score, f1_score
 from renesis.utils.plotter import Plotter
 from renesis.env_model.cppn import CPPNVirtualShapeBinaryTreeModel
-from renesis.env_model.gmm import GMMModel
-
-
-def sigmoid(x):
-    return 1 / (1 + np.exp(-x))
-
-
-def clip(x):
-    return (np.clip(x, -2, 2) + 2) / 4
-
-
-normalize = clip
+from renesis.env_model.gmm import GMMModel, GMMObserveSeqModel, normalize
 
 
 class VirtualShapeBaseEnvironment(gym.Env):
@@ -42,7 +31,7 @@ class VirtualShapeBaseEnvironment(gym.Env):
         return self.env_model.observe()
 
     def step(self, action):
-        self.env_model.step(normalize(action))
+        self.env_model.step(action)
         reward = self.get_reward()
         reward_diff = reward - self.previous_reward
         self.previous_reward = reward
@@ -163,7 +152,25 @@ class VirtualShapeGMMEnvironment(VirtualShapeBaseEnvironment):
         )
         super().__init__(config, env_model, env_model.materials)
 
+    def step(self, action):
+        return super().step(normalize(action))
+
     def render(self, mode="rgb_array"):
         if mode == "rgb_array":
-            img = self.plotter.plot_voxel(self.env_model.voxels, **self.render_config,)
+            img = self.plotter.plot_voxel(
+                self.env_model.voxels,
+                **self.render_config,
+            )
             return img
+
+
+class VirtualShapeGMMObserveSeqEnvironment(VirtualShapeGMMEnvironment):
+    def __init__(self, config):
+        env_model = GMMModel(
+            materials=config["materials"],
+            dimension_size=config["dimension_size"],
+            max_gaussian_num=config["max_gaussian_num"],
+        )
+        super(VirtualShapeGMMEnvironment, self).__init__(
+            config, env_model, env_model.materials
+        )

@@ -2,9 +2,9 @@ import ray
 from ray import tune
 from ray.tune.logger import TBXLoggerCallback
 from ray.rllib.algorithms.ppo import PPO
-from renesis.env.voxcraft import VoxcraftGMMEnvironment
-from experiments.gmm_voxcraft_rl.utils import *
-
+from renesis.env.voxcraft import VoxcraftGMMObserveSeqEnvironment
+from experiments.gmm_voxcraft_observe_seq_rl.utils import *
+from experiments.gmm_voxcraft_observe_seq_rl.model import *
 from renesis.utils.debug import enable_debugger
 
 dimension = 10
@@ -15,7 +15,7 @@ envs = 512
 rollout = 5
 
 config = {
-    "env": VoxcraftGMMEnvironment,
+    "env": VoxcraftGMMObserveSeqEnvironment,
     "env_config": {
         "debug": False,
         "dimension_size": dimension,
@@ -76,11 +76,12 @@ config = {
         "max_seq_len": steps,
         "custom_model_config": {
             "num_transformer_units": 1,
-            "attention_dim": 32,
-            "head_dim": 32,
-            "position_wise_mlp_dim": 32,
-            "memory_inference": steps,
-            "memory_training": steps,
+            "gaussian_dim": 16,
+            "voxel_dim": 112,
+            "attention_dim": 128,
+            "head_dim": 128,
+            "position_wise_mlp_dim": 128,
+            "memory": 0,
             "num_heads": 1,
         },
     },
@@ -91,7 +92,7 @@ config = {
 if __name__ == "__main__":
     # 1GB heap memory, 1GB object store
     ray.init(_memory=1 * (10**9), object_store_memory=10**9)
-
+    trainer = PPO(config=config)
     tune.run(
         PPO,
         name="",
