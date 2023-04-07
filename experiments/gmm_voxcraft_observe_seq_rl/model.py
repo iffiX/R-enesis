@@ -2,6 +2,7 @@ import gym.spaces
 import torch
 from gym.spaces import Dict as DictSpace, Box as BoxSpace
 from ray.rllib.models import ModelCatalog
+from ray.rllib.models.modelv2 import restore_original_dimensions
 from ray.rllib.models.torch.attention_net import *
 from ray.rllib.models.torch.torch_action_dist import TorchDiagGaussian
 from ray.rllib.models.torch.modules.relative_multi_head_attention import *
@@ -13,9 +14,8 @@ class RelativeMultiHeadAttentionUnevenSequence(RelativeMultiHeadAttention):
         self, inputs: TensorType, lengths: TensorType, memory: TensorType = None
     ) -> TensorType:
         # inputs shape: [Batch, Time, Dim]
-        # lengths shape: [Batch]
+        # lengths shape: [Batch, 1]
         # memory shape: [Batch, Time, Dim]
-
         T = list(inputs.size())[1]  # length of segment (time)
         H = self._num_heads  # number of attention heads
         d = self._head_dim  # attention head dimension
@@ -57,22 +57,25 @@ class RelativeMultiHeadAttentionUnevenSequence(RelativeMultiHeadAttention):
         # causal mask of the same length as the sequence
 
         # Note: Make the causal mask part corresponding to the left padding 0.
-        masks = [
-            sequence_mask(torch.arange(Tau + 1, Tau + T + 1), dtype=score.dtype).to(
-                score.device
-            )
-            for _ in range(len(lengths))
-        ]
-        for idx, l in enumerate(lengths):
-            masks[idx][:, Tau : Tau + T - int(l)] = 0
+        masks = []
+        for l in lengths:
+            sub_mask = sequence_mask(
+                torch.tensor([Tau + 1 + j if j <= int(l) else 0 for j in range(T)]),
+                maxlen=T,
+                dtype=score.dtype,
+            ).to(score.device)
+            masks.append(sub_mask)
         mask = torch.stack(masks, dim=0).view(score.shape)
 
         masked_score = score * mask + 1e30 * (mask.float() - 1.0)
-        wmat = nn.functional.softmax(masked_score, dim=2)
+        wmat = nn.functional.softmax(masked_score, dim=2) * mask
 
         out = torch.einsum("bijh,bjhd->bihd", wmat, values)
         shape = list(out.shape)[:2] + [H * d]
         out = torch.reshape(out, shape)
+
+        for l in lengths:
+            out[:, Tau + int(l) + 1 :] = 0
 
         return self._linear_layer(out)
 
@@ -95,6 +98,7 @@ class Actor(TorchModelV2, nn.Module):
         head_dim: int = 32,
         position_wise_mlp_dim: int = 32,
         init_gru_gate_bias: float = 2.0,
+        materials,
         for_online_policy: bool = True,
     ):
         assert gaussian_dim + voxel_dim == attention_dim
@@ -112,35 +116,41 @@ class Actor(TorchModelV2, nn.Module):
         self.memory = memory
         self.head_dim = head_dim
         self.max_seq_len = model_config["max_seq_len"]
+        self.materials = materials
         self.for_online_policy = for_online_policy
 
         self.input_gaussian_layer = SlimFC(
             in_size=observation_space["gaussians"].shape[-1], out_size=gaussian_dim
         )
         self.input_voxel_layer = SlimFC(
-            in_size=np.prod(observation_space["all_past_voxels"].shape[1:]),
+            in_size=np.prod(observation_space["all_past_voxels"].shape[1:])
+            * len(self.materials),
             out_size=voxel_dim,
         )
-
-        if for_online_policy:
-            # output half for mean, half for sigma
-            self.output_gaussian_layer = SlimFC(
-                in_size=self.attention_dim,
-                out_size=observation_space["gaussians"].shape[-1] * 2,
-            )
-        else:
-            self.output_gaussian_layer = SlimFC(
-                in_size=self.attention_dim,
-                out_size=observation_space["gaussians"].shape[-1],
-            )
         self.output_voxel_layer = SlimFC(
             in_size=self.attention_dim,
-            out_size=np.prod(observation_space["all_past_voxels"].shape[1:]),
+            out_size=np.prod(observation_space["all_past_voxels"].shape[1:])
+            * len(self.materials),
         )
         self._voxel_out = None
 
-        self.values_out = SlimFC(
-            in_size=self.attention_dim, out_size=1, activation_fn=None
+        self.action_out = nn.Sequential(
+            SlimFC(
+                in_size=self.attention_dim,
+                out_size=self.attention_dim,
+                activation_fn="relu",
+            ),
+            SlimFC(
+                in_size=self.attention_dim, out_size=num_outputs, activation_fn=None
+            ),
+        )
+        self.value_out = nn.Sequential(
+            SlimFC(
+                in_size=self.attention_dim,
+                out_size=self.attention_dim,
+                activation_fn="relu",
+            ),
+            SlimFC(in_size=self.attention_dim, out_size=1, activation_fn=None),
         )
         # Last value output.
         self._value_out = None
@@ -195,15 +205,17 @@ class Actor(TorchModelV2, nn.Module):
         input_dict,
         state: List[TensorType],
         seq_lens: TensorType,
-        return_all: bool = False,
+        return_voxel: bool = False,
     ) -> (TensorType, List[TensorType]):
         # shape [batch_size, max_gaussian_num, gaussian_input_dim]
-        gaussians = input_dict["obs"]["gaussians"]
+        gaussians = input_dict["obs"]["gaussians"][:, :-1, :]
         # shape [batch_size, 1]
         gaussian_num = input_dict["obs"]["gaussian_num"]
         # shape [batch_size, max_gaussian_num, dimension_size, dimension_size, dimension_size, material_num]
-        all_past_voxels = input_dict["obs"]["all_past_voxels"]
-        # enable_debugger()
+        all_past_voxels = self.to_one_hot_voxels(input_dict["obs"]["all_past_voxels"])[
+            :, :-1
+        ]
+
         all_out = torch.cat(
             (
                 self.input_gaussian_layer(gaussians),
@@ -232,17 +244,18 @@ class Actor(TorchModelV2, nn.Module):
         memory_outs = memory_outs[:-1]
 
         # all_out shape [batch_size, max_gaussian_num, attention_dim]
-        gaussian_logits = self.output_gaussian_layer(all_out)
         voxel_mean = self.output_voxel_layer(all_out)
         self._voxel_out = voxel_mean
 
         # Use last for computing value output.
-        self._value_out = self.values_out(all_out[:, -1, :])
+        last = gaussian_num.to(dtype=torch.long).flatten()
+        last_output = all_out[range(len(last)), last, :]
+        self._value_out = self.value_out(last_output)
 
-        if return_all:
-            out = (gaussian_logits, voxel_mean)
+        if return_voxel:
+            out = voxel_mean
         else:
-            out = gaussian_logits[:, -1, :]
+            out = self.action_out(last_output)
         return out, [torch.reshape(m, [-1, self.attention_dim]) for m in memory_outs]
 
     @override(ModelV2)
@@ -256,12 +269,42 @@ class Actor(TorchModelV2, nn.Module):
     def custom_loss(
         self, policy_loss: List[TensorType], loss_inputs: Dict[str, TensorType]
     ) -> List[TensorType]:
-        obs_predict_loss = torch.mean(
-            nn.functional.mse_loss(
-                self._voxel_out, torch.flatten(loss_inputs["next_obs"], dim=2)
+        obs = restore_original_dimensions(
+            loss_inputs["obs"].to(policy_loss[0].device),
+            self.obs_space,
+            tensorlib="torch",
+        )
+        next_obs = restore_original_dimensions(
+            loss_inputs["new_obs"].to(policy_loss[0].device),
+            self.obs_space,
+            tensorlib="torch",
+        )
+        next_all_past_voxels = self.to_one_hot_voxels(next_obs["all_past_voxels"])[
+            :, 1:
+        ]
+        voxel_predict_loss = torch.mean(
+            torch.cat(
+                [
+                    nn.functional.mse_loss(
+                        self._voxel_out[:, : 1 + int(l)],
+                        torch.flatten(next_all_past_voxels, start_dim=2)[
+                            :, : 1 + int(l)
+                        ],
+                    )
+                    for l in obs["gaussian_num"]
+                ]
             )
         )
-        return [_loss + obs_predict_loss for _loss in policy_loss]
+        return [_loss + voxel_predict_loss for _loss in policy_loss]
+
+    def to_one_hot_voxels(self, all_past_voxels):
+        all_past_voxels_one_hot = torch.stack(
+            [all_past_voxels == mat for mat in self.materials],
+            dim=-1,
+        ).to(dtype=torch.float32)
+        # ensure first one is full of zero since it corresponds to <s>
+        all_past_voxels_one_hot[:, 0] = 0
+        return all_past_voxels_one_hot
 
 
 ModelCatalog.register_custom_model("actor_model", Actor)

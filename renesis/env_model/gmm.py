@@ -235,7 +235,7 @@ class GMMObserveSeqModel(GMMModel):
                             low=0,
                             high=1,
                             shape=(
-                                self.max_gaussian_num,
+                                1 + self.max_gaussian_num,
                                 6 + len(self.materials),
                             ),
                         ),
@@ -248,10 +248,9 @@ class GMMObserveSeqModel(GMMModel):
                         "all_past_voxels",
                         Box(
                             low=0,
-                            high=1,
-                            shape=(self.max_gaussian_num,)
-                            + (self.dimension_size,) * 3
-                            + (len(self.materials),),
+                            high=len(self.materials) - 1,
+                            shape=(1 + self.max_gaussian_num,)
+                            + (self.dimension_size,) * 3,
                         ),
                     ),
                 ]
@@ -263,24 +262,22 @@ class GMMObserveSeqModel(GMMModel):
         self.all_past_voxels = []
 
     def step(self, action: np.ndarray):
+        # print(f"Step {len(self.gaussians)}: {self.scale(normalize(action))}")
         super().step(action)
-        self.all_past_voxels.append(
-            np.stack([self.voxels == mat for mat in self.materials], axis=-1)
-        )
+        self.all_past_voxels.append(self.voxels)
 
     def observe(self):
+        # First observation corresponds to <s>, start of sequence
         gaussians = np.zeros(
-            (self.max_gaussian_num, 6 + len(self.materials)), dtype=np.float32
+            (1 + self.max_gaussian_num, 6 + len(self.materials)), dtype=np.float32
         )
         all_past_voxels = np.zeros(
-            (self.max_gaussian_num,)
-            + (self.dimension_size,) * 3
-            + (len(self.materials),),
+            (1 + self.max_gaussian_num,) + (self.dimension_size,) * 3,
             dtype=np.float32,
         )
         if self.gaussians:
-            gaussians[-len(self.gaussians) :] = self.gaussians
-            all_past_voxels[-len(self.gaussians) :] = self.all_past_voxels
+            gaussians[1 : 1 + len(self.gaussians) :] = self.gaussians
+            all_past_voxels[1 : 1 + len(self.gaussians) :] = self.all_past_voxels
         return OrderedDict(
             [
                 ("gaussians", gaussians),

@@ -1,15 +1,16 @@
 import ray
-from ray import tune
-from ray.tune.logger import TBXLoggerCallback
+from PIL import Image
 from ray.rllib.algorithms.ppo import PPO
-from renesis.env.voxcraft import VoxcraftGMMObserveSeqEnvironment
+from renesis.utils.media import create_video_subproc
+from renesis.env.voxcraft import VoxcraftGMMObserveSeqEnvironment, normalize
 from experiments.gmm_voxcraft_observe_seq_rl.utils import *
 from experiments.gmm_voxcraft_observe_seq_rl.model import *
+from renesis.utils.plotter import Plotter
 from renesis.utils.debug import enable_debugger
 
 dimension = 10
 iters = 400
-steps = 3
+steps = 20
 workers = 1
 envs = 128
 rollout = 1
@@ -93,24 +94,44 @@ config = {
 if __name__ == "__main__":
     # 1GB heap memory, 1GB object store
     ray.init(_memory=1 * (10**9), object_store_memory=10**9)
-    trainer = PPO(config=config)
-    tune.run(
-        PPO,
-        name="",
-        config=config,
-        checkpoint_freq=5,
-        keep_checkpoints_num=10,
-        log_to_file=True,
-        stop={
-            "timesteps_total": config["train_batch_size"] * iters,
-            "episodes_total": config["train_batch_size"] * iters / steps,
-        },
-        # Order is important!
-        callbacks=[
-            DataLoggerCallback(config["env_config"]["base_config_path"]),
-            TBXLoggerCallback(),
-        ],
-        # restore="",
+
+    algo = PPO(config=config)
+    algo.restore(
+        "/home/mlw0504/ray_results/PPO_2023-04-06_17-32-12/PPO_VoxcraftGMMObserveSeqEnvironment_e046e_00000_0_2023-04-06_17-32-13/checkpoint_000080"
     )
+
+    # Create the env to do inference in.
+    env_config = config["env_config"].copy()
+    env_config["num_envs"] = 1
+    env = VoxcraftGMMObserveSeqEnvironment(env_config)
+    done = False
+    obs = env.reset_at(0)
+
+    transformer_attention_size = config["model"]["custom_model_config"].get(
+        "attention_dim", 64
+    )
+    transformer_length = config["model"]["custom_model_config"].get(
+        "num_transformer_units", 1
+    )
+    episode_reward = 0
+    best_reward = 0
+    best_robot = ""
+    plotter = Plotter(interactive=False)
+    for i in range(20):
+        # Compute an action (`a`).
+        a, state_out, *_ = algo.compute_single_action(
+            observation=obs,
+            explore=True,
+        )
+        # Send the computed action `a` to the env.
+        obs, reward, done, _ = env.vector_step([a])
+        print(env.env_model.scale(normalize(a)))
+        episode_reward += reward
+        if episode_reward > best_reward:
+            best_robot = env.env_models[0].voxels
+
+    pv.global_theme.window_size = [2048, 768]
+    img = plotter.plot_voxel(best_robot, distance=dimension * 3)
+    algo.stop()
 
     ray.shutdown()
