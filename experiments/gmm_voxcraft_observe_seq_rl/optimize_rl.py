@@ -9,7 +9,7 @@ from renesis.utils.debug import enable_debugger
 
 dimension = 10
 iters = 400
-steps = 3
+steps = 20
 workers = 1
 envs = 128
 rollout = 1

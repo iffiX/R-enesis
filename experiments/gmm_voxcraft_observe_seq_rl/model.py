@@ -283,7 +283,7 @@ class Actor(TorchModelV2, nn.Module):
             :, 1:
         ]
         voxel_predict_loss = torch.mean(
-            torch.cat(
+            torch.stack(
                 [
                     nn.functional.mse_loss(
                         self._voxel_out[:, : 1 + int(l)],
