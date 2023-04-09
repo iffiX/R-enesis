@@ -2,9 +2,7 @@
 #define VX3_MATH_TREE_H
 #include "assert.h"
 #include "utils/vx3_def.h"
-
-#define MAX_STACK_SIZE              4
-#define MAX_EXPRESSION_TOKENS       16
+#include "utils/vx3_conf.h"
 
 enum VX3_MathTreeOperator : unsigned int {
     mtEND,
@@ -34,7 +32,8 @@ enum VX3_MathTreeOperator : unsigned int {
 };
 struct VX3_MathTreeToken {
     VX3_MathTreeOperator op = mtEND;
-    Vfloat value = 0.0;
+    // For in values, using float is sufficient
+    float value = 0.0;
 
 #ifndef __CUDACC__
     void set(VX3_MathTreeOperator inOp, Vfloat inValue = 0.0) {
@@ -44,10 +43,12 @@ struct VX3_MathTreeToken {
 #else
     __host__ __device__ void set(VX3_MathTreeOperator inOp, Vfloat inValue = 0.0) {
         op = inOp;
-        value = inValue;
+        value = (float)inValue;
     }
 #endif
 };
+
+using VX3_MathTreeTokens = VX3_MathTreeToken[VX3_MATH_TREE_MAX_EXPRESSION_TOKENS];
 
 struct VX3_MathTree {
 
@@ -62,7 +63,7 @@ struct VX3_MathTree {
 
     static bool isExpressionValid(const VX3_MathTreeToken *buff) {
         int cursor = -1;
-        for (int i = 0; i < MAX_EXPRESSION_TOKENS; i++) {
+        for (int i = 0; i < VX3_MATH_TREE_MAX_EXPRESSION_TOKENS; i++) {
             switch (buff[i].op) {
                 case mtEND:
                     return true;
@@ -71,7 +72,7 @@ struct VX3_MathTree {
                 case mtPI:
                 case mtVAR:
                     // Cursor writes value and move to next position (put 1)
-                    if (cursor >= MAX_STACK_SIZE - 1)
+                    if (cursor >= VX3_MATH_TREE_MAX_STACK_SIZE - 1)
                         return false;
                     cursor++;
                     break;
@@ -124,28 +125,28 @@ struct VX3_MathTree {
                             (Vfloat)num_close_pairs,
                             (Vfloat)num_voxel};
         // Registers
-        Vfloat values[MAX_STACK_SIZE] = {0};
+        Vfloat values[VX3_MATH_TREE_MAX_STACK_SIZE] = {0};
         // Cursor points to the location of the last element
         int cursor = -1;
-        for (int i = 0; i < MAX_EXPRESSION_TOKENS; i++) {
+        for (int i = 0; i < VX3_MATH_TREE_MAX_EXPRESSION_TOKENS; i++) {
             switch (buff[i].op) {
             case mtEND:
                 return cursor == -1 ? 0 : values[cursor];
             case mtCONST:
-                assert(cursor < MAX_STACK_SIZE - 1);
+                assert(cursor < VX3_MATH_TREE_MAX_STACK_SIZE - 1);
                 values[++cursor] = buff[i].value;
                 break;
             case mtE:
-                assert(cursor < MAX_STACK_SIZE - 1);
+                assert(cursor < VX3_MATH_TREE_MAX_STACK_SIZE - 1);
                 values[++cursor] = 2.71828182845904523536;
                 break;
             case mtPI:
-                assert(cursor < MAX_STACK_SIZE - 1);
+                assert(cursor < VX3_MATH_TREE_MAX_STACK_SIZE - 1);
                 values[++cursor] = 3.14159265358979323846;
                 break;
             case mtVAR:
                 // Checking of index is done by the parser
-                assert(cursor < MAX_STACK_SIZE - 1);
+                assert(cursor < VX3_MATH_TREE_MAX_STACK_SIZE - 1);
                 values[++cursor] = inputs[llrintf(buff[i].value)];
                 break;
             case mtSIN:

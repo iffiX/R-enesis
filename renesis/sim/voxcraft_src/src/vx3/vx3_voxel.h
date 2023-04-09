@@ -217,7 +217,7 @@ private:
     //!< object's interaction with a floor. This
     //!< should be calculated as the last step of
     //!< sumForce so that pTotalForce is complete.
-    __device__ static void floorForce(VX3_Context &ctx, Vindex voxel, float dt,
+    __device__ static void floorForce(VX3_Context &ctx, Vindex voxel, Vfloat dt,
                                       Vec3f &total_force);
 
     //!< Set/Clear a bool state flag
@@ -225,14 +225,17 @@ private:
                                         bool active);
 };
 
-REFL_AUTO(type(VX3_Voxel), field(voxel_material), field(links), field(index_x),
-          field(index_y), field(index_z), field(position), field(nnn_offset),
-          field(ppp_offset), field(linear_momentum), field(orientation),
+REFL_AUTO(type(VX3_Voxel), field(index_x), field(index_y), field(index_z),
+          field(voxel_material), field(links),
+          field(amplitude), field(frequency), field(phase_offset),
+          field(base_cilia_force), field(shift_cilia_force),
+          field(initial_position), field(position),
+          field(nnn_offset), field(ppp_offset),
+          field(linear_momentum), field(orientation),
           field(angular_momentum), field(bool_states), field(temperature),
           field(poissons_strain), field(previous_dt),
-          field(last_col_watch_position), field(amplitude), field(frequency),
-          field(phase_offset), field(is_detached), field(contact_force),
-          field(base_cilia_force), field(shift_cilia_force), field(cilia_force),
+          field(is_detached), field(last_col_watch_position),
+          field(contact_force), field(cilia_force),
           field(enable_attach), field(signal), field(local_signal),
           field(local_signal_dt), field(packmaker_next_pulse), field(inactive_until))
 

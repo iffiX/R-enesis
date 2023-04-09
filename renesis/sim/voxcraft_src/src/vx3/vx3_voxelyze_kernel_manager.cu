@@ -11,12 +11,16 @@ using namespace boost;
 VX3_VoxelyzeKernel
 VX3_VoxelyzeKernelManager::createKernelFromConfig(const VX3_Config &config,
                                                   const cudaStream_t &stream) {
-    // Add the default "empty" material, then add user specified materials
-    ictx.voxel_materials.emplace_back(VX3_VoxelMaterial());
+
     for (auto &material_config : config.palette.materials) {
-        addVoxelMaterial(material_config, (int)ictx.voxel_materials.size(),
-                         config.lattice.lattice_dim, config.bond_damping_z,
-                         config.col_damping_z, config.slow_damping_z);
+        if (material_config.material_id == 0) {
+            // The default "empty" material
+            ictx.voxel_materials.emplace_back(VX3_VoxelMaterial());
+        } else {
+            addVoxelMaterial(material_config, (int)ictx.voxel_materials.size(),
+                             config.lattice.lattice_dim, config.bond_damping_z,
+                             config.col_damping_z, config.slow_damping_z);
+        }
     }
     // voxels and links (links are added when creating voxels)
     addVoxels(config.structure, config.lattice.lattice_dim);
@@ -32,7 +36,7 @@ VX3_VoxelyzeKernelManager::createKernelFromConfig(const VX3_Config &config,
         link.init(ictx);
 
     // Copy data to the voxelyze kernel
-    VX3_VoxelyzeKernel kernel(stream);
+    VX3_VoxelyzeKernel kernel;
     kernel.ctx.link_materials.fill(ictx.link_materials, stream);
     kernel.ctx.voxel_materials.fill(ictx.voxel_materials, stream);
     kernel.ctx.links.fill(ictx.links, stream);
@@ -94,29 +98,26 @@ VX3_VoxelyzeKernelManager::createKernelFromConfig(const VX3_Config &config,
     VcudaMallocAsync(&kernel.target_indices, sizeof(Vindex) * target_num, stream);
     VcudaMemcpyAsync(kernel.target_indices, tmp_target_indices,
                      sizeof(Vindex) * target_num, cudaMemcpyHostToDevice, stream);
+    // Make sure all host data are transferred
+    VcudaStreamSynchronize(stream);
     VcudaFreeHost(tmp_target_indices);
     kernel.target_num = target_num;
 
-    // Setup reduce memory
-    Vsize max_elem_num = MAX(ictx.voxels.size(), ictx.links.size());
-    VcudaMallocHost(&kernel.h_reduce_output, sizeof(Vfloat) * 4);
-    VcudaMallocAsync(&kernel.d_reduce1, sizeof(Vfloat) * max_elem_num * 4, stream);
-    VcudaMallocAsync(&kernel.d_reduce2, sizeof(Vfloat) * max_elem_num * 4, stream);
     return kernel;
 }
 
-void VX3_VoxelyzeKernelManager::freeKernel(VX3_VoxelyzeKernel &kernel) {
-    kernel.ctx.link_materials.free(kernel.stream);
-    kernel.ctx.voxel_materials.free(kernel.stream);
-    kernel.ctx.links.free(kernel.stream);
-    kernel.ctx.voxels.free(kernel.stream);
-    VcudaFreeHost(kernel.h_reduce_output);
-    VcudaFreeAsync(kernel.d_reduce1, kernel.stream);
-    VcudaFreeAsync(kernel.d_reduce2, kernel.stream);
-    VcudaFreeAsync(kernel.d_steps, kernel.stream);
-    VcudaFreeAsync(kernel.d_time_points, kernel.stream);
-    VcudaFreeAsync(kernel.d_link_record, kernel.stream);
-    VcudaFreeAsync(kernel.d_voxel_record, kernel.stream);
+void VX3_VoxelyzeKernelManager::freeKernel(VX3_VoxelyzeKernel &kernel,
+                                           const cudaStream_t &stream) {
+    kernel.ctx.link_materials.free(stream);
+    kernel.ctx.voxel_materials.free(stream);
+    kernel.ctx.links.free(stream);
+    kernel.ctx.voxels.free(stream);
+    VcudaFreeAsync(kernel.d_steps, stream);
+    VcudaFreeAsync(kernel.d_time_points, stream);
+    VcudaFreeAsync(kernel.d_link_record, stream);
+    VcudaFreeAsync(kernel.d_voxel_record, stream);
+    // Make sure all free actions are finished
+    VcudaStreamSynchronize(stream);
 }
 
 void VX3_VoxelyzeKernelManager::addVoxelMaterial(
@@ -180,18 +181,18 @@ Vindex VX3_VoxelyzeKernelManager::addOrGetLinkMaterial(Vindex voxel1_material_in
 
 void VX3_VoxelyzeKernelManager::addVoxels(const VX3_StructureConfig &structure_config,
                                           Vfloat vox_size) {
-    for (int z = 0; z < structure_config.z_voxels; z++) {
-        for (int y = 0; y < structure_config.y_voxels; y++) {
-            for (int x = 0; x < structure_config.x_voxels; x++) {
+    for (short z = 0; z < structure_config.z_voxels; z++) {
+        for (short y = 0; y < structure_config.y_voxels; y++) {
+            for (short x = 0; x < structure_config.x_voxels; x++) {
                 int idx_1d = index3DToIndex1D(x, y, z, structure_config.x_voxels,
                                               structure_config.y_voxels);
                 // Skip empty voxels
                 if (structure_config.data[idx_1d] == 0)
                     continue;
                 auto voxel = VX3_Voxel();
-                voxel.index_x = (short)x;
-                voxel.index_y = (short)y;
-                voxel.index_z = (short)z;
+                voxel.index_x = x;
+                voxel.index_y = y;
+                voxel.index_z = z;
                 voxel.position.x = (Vfloat)x * vox_size;
                 voxel.position.y = (Vfloat)y * vox_size;
                 voxel.position.z = (Vfloat)z * vox_size;
@@ -217,11 +218,12 @@ void VX3_VoxelyzeKernelManager::addVoxels(const VX3_StructureConfig &structure_c
     }
 }
 
-void VX3_VoxelyzeKernelManager::addLink(int x, int y, int z, LinkDirection direction) {
+void VX3_VoxelyzeKernelManager::addLink(short x, short y, short z,
+                                        LinkDirection direction) {
     auto voxel1_coords = index3DToCoordinate(x, y, z);
-    auto voxel2_coords = index3DToCoordinate(x + xIndexVoxelOffset(direction),
-                                             y + yIndexVoxelOffset(direction),
-                                             z + zIndexVoxelOffset(direction));
+    auto voxel2_coords = index3DToCoordinate(x + (short)xIndexVoxelOffset(direction),
+                                             y + (short)yIndexVoxelOffset(direction),
+                                             z + (short)zIndexVoxelOffset(direction));
     if (coordinate_to_voxel_index.find(voxel1_coords) ==
             coordinate_to_voxel_index.end() ||
         coordinate_to_voxel_index.find(voxel2_coords) == coordinate_to_voxel_index.end())
@@ -262,14 +264,15 @@ void VX3_VoxelyzeKernelManager::addLink(int x, int y, int z, LinkDirection direc
 
 void VX3_VoxelyzeKernelManager::setMathExpression(
     VX3_MathTreeToken *tokens, const VX3_Config::VX3_MathTreeExpression &expr) {
-    if (expr.size() > MAX_EXPRESSION_TOKENS)
+    if (expr.size() > VX3_MATH_TREE_MAX_EXPRESSION_TOKENS)
         throw std::invalid_argument("Math expression size too large");
     for (size_t i = 0; i < expr.size(); i++)
         tokens[i] = expr[i];
 }
 
-inline string VX3_VoxelyzeKernelManager::index3DToCoordinate(int x, int y, int z) const {
-    return (format{"%d,%d,%d"} % x % y % z).str();
+inline uint64_t VX3_VoxelyzeKernelManager::index3DToCoordinate(short x, short y,
+                                                               short z) const {
+    return uint64_t(x) << 32 | uint64_t(y) << 16 | uint64_t(z);
 }
 
 inline int VX3_VoxelyzeKernelManager::index3DToIndex1D(int x, int y, int z, int x_size,
