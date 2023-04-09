@@ -213,7 +213,7 @@ class GMMModel(BaseModel):
             self.num_non_zero_voxel = 0
 
 
-class GMMObserveSeqModel(GMMModel):
+class GMMObserveWithVoxelModel(GMMModel):
     def __init__(
         self,
         materials=(0, 1, 2),
@@ -221,70 +221,76 @@ class GMMObserveSeqModel(GMMModel):
         max_gaussian_num=100,
         cutoff=1e-2,
     ):
-        self.all_past_voxels = None
         super().__init__(materials, dimension_size, max_gaussian_num, cutoff)
 
     @property
     def observation_space(self):
-        return Dict(
-            OrderedDict(
-                [
-                    (
-                        "gaussians",
-                        Box(
-                            low=0,
-                            high=1,
-                            shape=(
-                                1 + self.max_gaussian_num,
-                                6 + len(self.materials),
-                            ),
-                        ),
-                    ),
-                    (
-                        "gaussian_num",
-                        Box(low=0, high=self.max_gaussian_num, dtype=int, shape=(1,)),
-                    ),
-                    (
-                        "all_past_voxels",
-                        Box(
-                            low=0,
-                            high=len(self.materials) - 1,
-                            shape=(1 + self.max_gaussian_num,)
-                            + (self.dimension_size,) * 3,
-                        ),
-                    ),
-                ]
-            )
+        # Flatten observation space into Box space since ray trajectory view
+        # doesn't support Dict space for the shift function.
+        # See:
+        # https://github.com/ray-project/ray/blob/
+        # 5b99dd9b79d8e1d26b0254ab2f3d270331369a0e/rllib/policy/policy.py#L1513
+
+        # return Dict(
+        #     OrderedDict(
+        #         [
+        #             (
+        #                 "gaussian",
+        #                 Box(
+        #                     low=0,
+        #                     high=1,
+        #                     shape=(6 + len(self.materials),),
+        #                 ),
+        #             ),
+        #             (
+        #                 "voxels",
+        #                 Box(
+        #                     low=0,
+        #                     high=len(self.materials) - 1,
+        #                     shape=(self.dimension_size,) * 3,
+        #                 ),
+        #             ),
+        #         ]
+        #     )
+        # )
+
+        return Box(
+            low=np.zeros(
+                (6 + len(self.materials) + self.dimension_size**3,), dtype=np.float32
+            ),
+            high=np.array(
+                [self.max_gaussian_num - 1]
+                + [1] * (6 + len(self.materials))
+                + [len(self.materials) - 1] * self.dimension_size**3,
+                dtype=np.float32,
+            ),
         )
-
-    def reset(self, initial_steps=0):
-        super().reset(initial_steps)
-        self.all_past_voxels = []
-
-    def step(self, action: np.ndarray):
-        # print(f"Step {len(self.gaussians)}: {self.scale(normalize(action))}")
-        super().step(action)
-        self.all_past_voxels.append(self.voxels)
 
     def observe(self):
-        # First observation corresponds to <s>, start of sequence
-        gaussians = np.zeros(
-            (1 + self.max_gaussian_num, 6 + len(self.materials)), dtype=np.float32
+        # return OrderedDict(
+        #     [
+        #         ("gaussian", super().observe()),
+        #         (
+        #             "voxels",
+        #             self.voxels
+        #             if self.voxels is not None
+        #             else np.zeros(
+        #                 [self.dimension_size] * 3,
+        #                 dtype=float,
+        #             ),
+        #         ),
+        #     ]
+        # )
+        voxels = (
+            self.voxels
+            if self.voxels is not None
+            else np.zeros([self.dimension_size**3], dtype=np.float32)
         )
-        all_past_voxels = np.zeros(
-            (1 + self.max_gaussian_num,) + (self.dimension_size,) * 3,
-            dtype=np.float32,
-        )
-        if self.gaussians:
-            gaussians[1 : 1 + len(self.gaussians) :] = self.gaussians
-            all_past_voxels[1 : 1 + len(self.gaussians) :] = self.all_past_voxels
-        return OrderedDict(
+        return np.concatenate(
             [
-                ("gaussians", gaussians),
-                ("gaussian_num", np.array((len(self.gaussians),))),
-                (
-                    "all_past_voxels",
-                    all_past_voxels,
-                ),
-            ]
+                np.array([len(self.gaussians)], dtype=np.float32),
+                super().observe(),
+                voxels.reshape(-1),
+            ],
+            axis=0,
         )

@@ -6,6 +6,7 @@ from ray.rllib.models.modelv2 import restore_original_dimensions
 from ray.rllib.models.torch.attention_net import *
 from ray.rllib.models.torch.torch_action_dist import TorchDiagGaussian
 from ray.rllib.models.torch.modules.relative_multi_head_attention import *
+from ray.rllib.policy.sample_batch import SampleBatch
 from renesis.utils.debug import print_model_size, enable_debugger
 
 
@@ -56,7 +57,15 @@ class RelativeMultiHeadAttentionUnevenSequence(RelativeMultiHeadAttention):
 
         # causal mask of the same length as the sequence
 
-        # Note: Make the causal mask part corresponding to the left padding 0.
+        # For a sequence of length 3 in the batch: <s> <some_token> <some_token2>
+        # Suppose total time length T = 5
+        # Since the right 2 tokens are padded with 0s
+        # The sub mask is like:
+        # [1, 0, 0, 0, 0]
+        # [1, 1, 0, 0, 0]
+        # [1, 1, 1, 0, 0]
+        # [0, 0, 0, 0, 0]
+        # [0, 0, 0, 0, 0]
         masks = []
         for l in lengths:
             sub_mask = sequence_mask(
@@ -74,6 +83,8 @@ class RelativeMultiHeadAttentionUnevenSequence(RelativeMultiHeadAttention):
         shape = list(out.shape)[:2] + [H * d]
         out = torch.reshape(out, shape)
 
+        # output shape: [Batch, Time, Dim]
+        # Set positions larger than input length to 0.
         for l in lengths:
             out[:, Tau + int(l) + 1 :] = 0
 
@@ -198,6 +209,22 @@ class Actor(TorchModelV2, nn.Module):
         # Create a Sequential such that all parameters inside the attention
         # layers are automatically registered with this top-level model.
         self.attention_layers = nn.Sequential(*attention_layers)
+
+        # Setup trajectory views (`memory-inference` x past memory outs).
+        self.view_requirements[SampleBatch.OBS]
+        for i in range(self.num_transformer_units):
+            space = Box(-1.0, 1.0, shape=(self.attention_dim,))
+            self.view_requirements["state_in_{}".format(i)] = ViewRequirement(
+                "state_out_{}".format(i),
+                shift="-{}:-1".format(self.memory_inference),
+                # Repeat the incoming state every max-seq-len times.
+                batch_repeat_value=self.max_seq_len,
+                space=space,
+            )
+            self.view_requirements["state_out_{}".format(i)] = ViewRequirement(
+                space=space, used_for_training=False
+            )
+
         print_model_size(self)
 
     @override(ModelV2)

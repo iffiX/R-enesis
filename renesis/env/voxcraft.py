@@ -14,7 +14,7 @@ from renesis.env_model.cppn import (
     CPPNBinaryTreeModel,
     CPPNBinaryTreeWithPhaseOffsetModel,
 )
-from renesis.env_model.gmm import GMMModel, GMMObserveSeqModel, normalize
+from renesis.env_model.gmm import GMMModel, GMMObserveWithVoxelModel, normalize
 from renesis.env_model.growth import GrowthModel
 
 
@@ -79,6 +79,7 @@ class VoxcraftBaseEnvironment(VectorEnv):
 
     @override(VectorEnv)
     def vector_step(self, actions):
+        print("Stepping")
         all_finished = self.check_finished()
         for model, action, finished in zip(self.env_models, actions, all_finished):
             if not finished:
@@ -309,12 +310,12 @@ class VoxcraftGMMEnvironment(VoxcraftBaseEnvironment):
         return super().vector_step([normalize(action) for action in actions])
 
 
-class VoxcraftGMMObserveSeqEnvironment(VoxcraftGMMEnvironment):
+class VoxcraftGMMObserveWithVoxelEnvironment(VoxcraftGMMEnvironment):
     def __init__(self, config):
         if config.get("debug", False):
             enable_debugger(config["debug_ip"], config["debug_port"])
         env_models = [
-            GMMObserveSeqModel(
+            GMMObserveWithVoxelModel(
                 materials=config["materials"],
                 dimension_size=config["dimension_size"],
                 max_gaussian_num=config["max_gaussian_num"],

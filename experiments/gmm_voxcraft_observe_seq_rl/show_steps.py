@@ -2,7 +2,7 @@ import ray
 from PIL import Image
 from ray.rllib.algorithms.ppo import PPO
 from renesis.utils.media import create_video_subproc
-from renesis.env.voxcraft import VoxcraftGMMObserveSeqEnvironment, normalize
+from renesis.env.voxcraft import VoxcraftGMMObserveWithVoxelEnvironment, normalize
 from experiments.gmm_voxcraft_observe_seq_rl.utils import *
 from experiments.gmm_voxcraft_observe_seq_rl.model import *
 from renesis.utils.plotter import Plotter
@@ -16,7 +16,7 @@ envs = 128
 rollout = 1
 
 config = {
-    "env": VoxcraftGMMObserveSeqEnvironment,
+    "env": VoxcraftGMMObserveWithVoxelEnvironment,
     "env_config": {
         "debug": False,
         "dimension_size": dimension,
@@ -96,14 +96,14 @@ if __name__ == "__main__":
     ray.init(_memory=1 * (10**9), object_store_memory=10**9)
 
     algo = PPO(config=config)
-    algo.restore(
-        "/home/mlw0504/ray_results/PPO_2023-04-06_17-32-12/PPO_VoxcraftGMMObserveSeqEnvironment_e046e_00000_0_2023-04-06_17-32-13/checkpoint_000080"
-    )
+    # algo.restore(
+    #     "/home/mlw0504/ray_results/PPO_2023-04-06_17-32-12/PPO_VoxcraftGMMObserveSeqEnvironment_e046e_00000_0_2023-04-06_17-32-13/checkpoint_000080"
+    # )
 
     # Create the env to do inference in.
     env_config = config["env_config"].copy()
     env_config["num_envs"] = 1
-    env = VoxcraftGMMObserveSeqEnvironment(env_config)
+    env = VoxcraftGMMObserveWithVoxelEnvironment(env_config)
     done = False
     obs = env.reset_at(0)
 

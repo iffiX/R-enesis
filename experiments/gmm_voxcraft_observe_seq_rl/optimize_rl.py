@@ -2,20 +2,20 @@ import ray
 from ray import tune
 from ray.tune.logger import TBXLoggerCallback
 from ray.rllib.algorithms.ppo import PPO
-from renesis.env.voxcraft import VoxcraftGMMObserveSeqEnvironment
+from renesis.env.voxcraft import VoxcraftGMMObserveWithVoxelEnvironment
 from experiments.gmm_voxcraft_observe_seq_rl.utils import *
 from experiments.gmm_voxcraft_observe_seq_rl.model import *
 from renesis.utils.debug import enable_debugger
 
 dimension = 10
 iters = 400
-steps = 20
-workers = 2
-envs = 512
-rollout = 2
+steps = 5
+workers = 1
+envs = 128
+rollout = 1
 
 config = {
-    "env": VoxcraftGMMObserveSeqEnvironment,
+    "env": VoxcraftGMMObserveWithVoxelEnvironment,
     "env_config": {
         "debug": False,
         "dimension_size": dimension,
@@ -84,6 +84,7 @@ config = {
             "position_wise_mlp_dim": 128,
             "memory": 0,
             "num_heads": 1,
+            "dimension_size": dimension,
             "materials": (0, 1, 2, 3),
         },
     },
