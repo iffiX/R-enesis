@@ -157,10 +157,7 @@ class VirtualShapeGMMEnvironment(VirtualShapeBaseEnvironment):
 
     def render(self, mode="rgb_array"):
         if mode == "rgb_array":
-            img = self.plotter.plot_voxel(
-                self.env_model.voxels,
-                **self.render_config,
-            )
+            img = self.plotter.plot_voxel(self.env_model.voxels, **self.render_config,)
             return img
 
 

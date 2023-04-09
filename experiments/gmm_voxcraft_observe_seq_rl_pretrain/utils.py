@@ -40,14 +40,7 @@ class CustomCallbacks(DefaultCallbacks):
         episode.media["episode_data"] = {}
 
     def on_episode_end(
-        self,
-        *,
-        worker,
-        base_env,
-        policies,
-        episode,
-        env_index,
-        **kwargs,
+        self, *, worker, base_env, policies, episode, env_index, **kwargs,
     ):
         # Check if there are multiple episodes in a batch, i.e.
         # "batch_mode": "truncate_episodes".
@@ -68,14 +61,7 @@ class CustomCallbacks(DefaultCallbacks):
         #     env_index
         # ]
 
-    def on_train_result(
-        self,
-        *,
-        algorithm,
-        result,
-        trainer,
-        **kwargs,
-    ) -> None:
+    def on_train_result(self, *, algorithm, result, trainer, **kwargs,) -> None:
         # Remove non-evaluation data
         result["episode_media"] = {}
         if "sampler_results" in result:

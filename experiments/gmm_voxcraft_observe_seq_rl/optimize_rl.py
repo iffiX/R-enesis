@@ -9,10 +9,10 @@ from renesis.utils.debug import enable_debugger
 
 dimension = 10
 iters = 400
-steps = 5
+steps = 20
 workers = 1
 envs = 128
-rollout = 1
+rollout = 5
 
 config = {
     "env": VoxcraftGMMObserveWithVoxelEnvironment,
@@ -33,12 +33,12 @@ config = {
     "normalize_actions": False,
     "disable_env_checking": True,
     "render_env": False,
-    "sgd_minibatch_size": 512,
+    "sgd_minibatch_size": envs,
     "num_sgd_iter": 30,
     "train_batch_size": steps * workers * envs * rollout,
     "lr": 1e-4,
     "rollout_fragment_length": steps * envs * rollout,
-    "vf_clip_param": 10**5,
+    "vf_clip_param": 10 ** 5,
     "seed": 132434,
     "num_workers": workers,
     "num_gpus": 0.1,
@@ -94,8 +94,7 @@ config = {
 
 if __name__ == "__main__":
     # 1GB heap memory, 1GB object store
-    ray.init(_memory=1 * (10**9), object_store_memory=10**9)
-    trainer = PPO(config=config)
+    ray.init(_memory=1 * (10 ** 9), object_store_memory=10 ** 9)
     tune.run(
         PPO,
         name="",

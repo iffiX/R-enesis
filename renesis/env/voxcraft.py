@@ -79,7 +79,6 @@ class VoxcraftBaseEnvironment(VectorEnv):
 
     @override(VectorEnv)
     def vector_step(self, actions):
-        print("Stepping")
         all_finished = self.check_finished()
         for model, action, finished in zip(self.env_models, actions, all_finished):
             if not finished:

@@ -39,7 +39,7 @@ config = {
     "train_batch_size": steps * workers * envs * rollout,
     "lr": 1e-4,
     "rollout_fragment_length": steps * envs * rollout,
-    "vf_clip_param": 10**5,
+    "vf_clip_param": 10 ** 5,
     "seed": 132434,
     "num_workers": workers,
     "num_gpus": 0.1,
@@ -93,7 +93,7 @@ config = {
 
 if __name__ == "__main__":
     # 1GB heap memory, 1GB object store
-    ray.init(_memory=1 * (10**9), object_store_memory=10**9)
+    ray.init(_memory=1 * (10 ** 9), object_store_memory=10 ** 9)
 
     algo = PPO(config=config)
     algo.restore(
@@ -119,10 +119,7 @@ if __name__ == "__main__":
     plotter = Plotter(interactive=False)
     for i in range(20):
         # Compute an action (`a`).
-        a, state_out, *_ = algo.compute_single_action(
-            observation=obs,
-            explore=True,
-        )
+        a, state_out, *_ = algo.compute_single_action(observation=obs, explore=True,)
         # Send the computed action `a` to the env.
         obs, reward, done, _ = env.vector_step([a])
         print(env.env_model.scale(normalize(a)))

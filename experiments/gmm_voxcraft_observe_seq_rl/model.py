@@ -54,7 +54,7 @@ class RelativeMultiHeadAttentionUnevenSequence(RelativeMultiHeadAttention):
         score = torch.einsum("bihd,bjhd->bijh", queries + self._uvar, keys)
         pos_score = torch.einsum("bihd,jhd->bijh", queries + self._vvar, R)
         score = score + self.rel_shift(pos_score)
-        score = score / d**0.5
+        score = score / d ** 0.5
 
         # causal mask of the same length as the sequence
 
@@ -123,7 +123,7 @@ class Actor(TorchModelV2, nn.Module):
 
         nn.Module.__init__(self)
         self.num_transformer_units = num_transformer_units
-        self.input_gaussian_dim = observation_space.shape[0] - dimension_size**3
+        self.input_gaussian_dim = observation_space.shape[0] - 1 - dimension_size ** 3
         self.gaussian_dim = gaussian_dim
         self.voxel_dim = voxel_dim
         self.attention_dim = attention_dim
@@ -139,14 +139,14 @@ class Actor(TorchModelV2, nn.Module):
             in_size=self.input_gaussian_dim, out_size=gaussian_dim
         )
         self.input_voxel_layer = SlimFC(
-            in_size=dimension_size**3 * len(self.materials),
-            out_size=voxel_dim,
+            in_size=dimension_size ** 3 * len(self.materials), out_size=voxel_dim,
         )
         self.output_voxel_layer = SlimFC(
             in_size=self.attention_dim,
-            out_size=dimension_size**3 * len(self.materials),
+            out_size=dimension_size ** 3 * len(self.materials),
         )
         self._voxel_out = None
+        self._voxel_predict_loss = 0
 
         self.action_out = nn.Sequential(
             SlimFC(
@@ -253,11 +253,12 @@ class Actor(TorchModelV2, nn.Module):
         return_voxel: bool = False,
     ) -> (TensorType, List[TensorType]):
         # shape [batch_size, max_seq_len, gaussian_input_dim]
-        past_gaussians, past_voxels = self.unpack_observations(input_dict["custom_obs"])
+        time, past_gaussians, past_voxels = self.unpack_observations(
+            input_dict["custom_obs"]
+        )
 
         # First observation corresponds to special start token
-        past_gaussians = self.reorder_observation(past_gaussians, time, shift=1)
-        print(f"t: {int(time[0])} g: {past_gaussians[0]}")
+        past_gaussians = self.reorder_observation(past_gaussians, time, left_shift=1)
         # Note: the last dimension is ordered by material first, then by voxel dimensions
         # shape [batch_size, max_seq_len, material_num * dimension_size ** 3]
         past_voxels = self.to_one_hot_voxels(
@@ -297,8 +298,6 @@ class Actor(TorchModelV2, nn.Module):
 
         # Use last for computing value output.
         last = time.to(dtype=torch.long).flatten()
-        print(all_out.shape)
-        print(last)
         last_output = all_out[range(len(last)), last, :]
         self._value_out = self.value_out(last_output)
 
@@ -315,14 +314,16 @@ class Actor(TorchModelV2, nn.Module):
         ), "Must call forward first AND must have value branch!"
         return torch.reshape(self._value_out, [-1])
 
+    def metrics(self) -> Dict[str, TensorType]:
+        return {"voxel_predict_loss": self._voxel_predict_loss}
+
     @override(ModelV2)
     def custom_loss(
         self, policy_loss: List[TensorType], loss_inputs: Dict[str, TensorType]
     ) -> List[TensorType]:
-        time = loss_inputs["custom_t"] + 1
-        _, next_past_voxels = self.unpack_observations(loss_inputs["custom_next_obs"])
-        print("Custom loss")
-        print(f"t: {int(time[0])} g: {self.reorder_observation(_, time)[0]}")
+        time, _, next_past_voxels = self.unpack_observations(
+            loss_inputs["custom_next_obs"]
+        )
 
         next_past_voxels = self.reorder_observation(next_past_voxels, time)
         next_past_voxels = self.to_one_hot_voxels(next_past_voxels).to(
@@ -339,19 +340,21 @@ class Actor(TorchModelV2, nn.Module):
                 ]
             )
         )
+        self._voxel_predict_loss = float(voxel_predict_loss)
+        print(f"Voxel prediction loss: {voxel_predict_loss}")
         return [_loss + voxel_predict_loss for _loss in policy_loss]
 
-    def unpack_observations(self, observations, is_next_obs=False):
+    def unpack_observations(self, observations):
         # shape of observations
         # [batch_size, max_seq_len, 1 + gaussian_input_dim + dimension_size ** 3]
         # Unpack the last dim into time observation, gaussian observation and voxels observation
         return (
-            observations[:, :, 0],
+            observations[:, -1, 0],
             observations[:, :, 1 : 1 + self.input_gaussian_dim],
             observations[:, :, 1 + self.input_gaussian_dim :],
         )
 
-    def reorder_observation(self, observation, T, shift=0):
+    def reorder_observation(self, observation, T, left_shift=0):
         # Since ray will add padding to the left, we have to cut the left
         # padding off and add it to the right side.
 
@@ -359,8 +362,10 @@ class Actor(TorchModelV2, nn.Module):
         # T starts at 0 for first step.
         result = []
         for idx, t in enumerate(T):
-            padding = observation[idx, : self.max_seq_len - int(t) - shift]
-            real_observation = observation[idx, self.max_seq_len - int(t) - shift :]
+            padding = observation[idx, : self.max_seq_len - int(t) - left_shift]
+            real_observation = observation[
+                idx, self.max_seq_len - int(t) - left_shift :
+            ]
             # Add padding to the right.
             result.append(torch.cat([real_observation, padding], dim=0))
 
@@ -368,8 +373,7 @@ class Actor(TorchModelV2, nn.Module):
 
     def to_one_hot_voxels(self, all_past_voxels):
         all_past_voxels_one_hot = torch.cat(
-            [all_past_voxels == mat for mat in self.materials],
-            dim=-1,
+            [all_past_voxels == mat for mat in self.materials], dim=-1,
         ).to(dtype=torch.float32)
         # ensure first one is full of zero since it corresponds to <s>
         all_past_voxels_one_hot[:, 0] = 0

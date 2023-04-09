@@ -53,7 +53,7 @@ class RelativeMultiHeadAttentionUnevenSequence(RelativeMultiHeadAttention):
         score = torch.einsum("bihd,bjhd->bijh", queries + self._uvar, keys)
         pos_score = torch.einsum("bihd,jhd->bijh", queries + self._vvar, R)
         score = score + self.rel_shift(pos_score)
-        score = score / d**0.5
+        score = score / d ** 0.5
 
         # causal mask of the same length as the sequence
 
@@ -327,8 +327,7 @@ class Actor(TorchModelV2, nn.Module):
 
     def to_one_hot_voxels(self, all_past_voxels):
         all_past_voxels_one_hot = torch.stack(
-            [all_past_voxels == mat for mat in self.materials],
-            dim=-1,
+            [all_past_voxels == mat for mat in self.materials], dim=-1,
         ).to(dtype=torch.float32)
         # ensure first one is full of zero since it corresponds to <s>
         all_past_voxels_one_hot[:, 0] = 0

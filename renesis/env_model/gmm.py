@@ -27,11 +27,7 @@ normalize = clip
 
 class GMMModel(BaseModel):
     def __init__(
-        self,
-        materials=(0, 1, 2),
-        dimension_size=20,
-        max_gaussian_num=100,
-        cutoff=1e-2,
+        self, materials=(0, 1, 2), dimension_size=20, max_gaussian_num=100, cutoff=1e-2,
     ):
         """
         Tail bound from
@@ -174,10 +170,7 @@ class GMMModel(BaseModel):
             values = np.where(values > np.max(values) * self.cutoff, values, 0)
             all_values.append(values)
 
-        self.voxels = np.zeros(
-            [self.dimension_size] * 3,
-            dtype=float,
-        )
+        self.voxels = np.zeros([self.dimension_size] * 3, dtype=float,)
 
         if self.gaussians:
             # all_values shape [coord_num, gaussian_num]
@@ -215,11 +208,7 @@ class GMMModel(BaseModel):
 
 class GMMObserveWithVoxelModel(GMMModel):
     def __init__(
-        self,
-        materials=(0, 1, 2),
-        dimension_size=20,
-        max_gaussian_num=100,
-        cutoff=1e-2,
+        self, materials=(0, 1, 2), dimension_size=20, max_gaussian_num=100, cutoff=1e-2,
     ):
         super().__init__(materials, dimension_size, max_gaussian_num, cutoff)
 
@@ -256,12 +245,13 @@ class GMMObserveWithVoxelModel(GMMModel):
 
         return Box(
             low=np.zeros(
-                (6 + len(self.materials) + self.dimension_size**3,), dtype=np.float32
+                (1 + 6 + len(self.materials) + self.dimension_size ** 3,),
+                dtype=np.float32,
             ),
             high=np.array(
-                [self.max_gaussian_num - 1]
+                [self.max_gaussian_num]
                 + [1] * (6 + len(self.materials))
-                + [len(self.materials) - 1] * self.dimension_size**3,
+                + [len(self.materials) - 1] * self.dimension_size ** 3,
                 dtype=np.float32,
             ),
         )
@@ -284,7 +274,7 @@ class GMMObserveWithVoxelModel(GMMModel):
         voxels = (
             self.voxels
             if self.voxels is not None
-            else np.zeros([self.dimension_size**3], dtype=np.float32)
+            else np.zeros([self.dimension_size ** 3], dtype=np.float32)
         )
         return np.concatenate(
             [
