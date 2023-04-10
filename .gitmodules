@@ -1,0 +1,3 @@
+[submodule "renesis/sim/renesis/sim/voxcraft_src"]
+	path = renesis/sim/renesis/sim/voxcraft_src
+	url = https://github.com/iffiX/voxcraft-sim.git
