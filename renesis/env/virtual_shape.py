@@ -3,7 +3,7 @@ import numpy as np
 from sklearn.metrics import precision_score, recall_score, f1_score
 from renesis.utils.plotter import Plotter
 from renesis.env_model.cppn import CPPNVirtualShapeBinaryTreeModel
-from renesis.env_model.gmm import GMMModel, GMMObserveSeqModel, normalize
+from renesis.env_model.gmm import GMMModel, GMMObserveWithVoxelModel, normalize
 
 
 class VirtualShapeBaseEnvironment(gym.Env):
@@ -46,6 +46,11 @@ class VirtualShapeBaseEnvironment(gym.Env):
 
     def get_reward(self):
         """
+        Note:
+            Special reward type "none", used when using this environment for
+            generating pretraining episodes, to speed up generation, skip
+            reward computation.
+
         if not start with "multi_":
         recall, precision, f1: Treat the problem as a binary classification problem.
 
@@ -62,7 +67,9 @@ class VirtualShapeBaseEnvironment(gym.Env):
             classification problem. Returns the weighted score.
         """
         reward = None
-        if not self.reward_type.startswith("multi_"):
+        if self.reward_type == "none":
+            reward = 0
+        elif not self.reward_type.startswith("multi_"):
             correct_num = np.sum(
                 np.logical_and(
                     self.reference_shape != 0,
@@ -157,13 +164,16 @@ class VirtualShapeGMMEnvironment(VirtualShapeBaseEnvironment):
 
     def render(self, mode="rgb_array"):
         if mode == "rgb_array":
-            img = self.plotter.plot_voxel(self.env_model.voxels, **self.render_config,)
+            img = self.plotter.plot_voxel(
+                self.env_model.voxels,
+                **self.render_config,
+            )
             return img
 
 
-class VirtualShapeGMMObserveSeqEnvironment(VirtualShapeGMMEnvironment):
+class VirtualShapeGMMObserveWithVoxelEnvironment(VirtualShapeGMMEnvironment):
     def __init__(self, config):
-        env_model = GMMModel(
+        env_model = GMMObserveWithVoxelModel(
             materials=config["materials"],
             dimension_size=config["dimension_size"],
             max_gaussian_num=config["max_gaussian_num"],
