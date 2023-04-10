@@ -1,8 +1,6 @@
 import torch
 from ray.rllib.models import ModelCatalog
-from ray.rllib.models.modelv2 import restore_original_dimensions
 from ray.rllib.models.torch.attention_net import *
-from ray.rllib.models.torch.torch_action_dist import TorchDiagGaussian
 from ray.rllib.models.torch.modules.relative_multi_head_attention import *
 from ray.rllib.policy.sample_batch import SampleBatch
 from renesis.utils.debug import print_model_size, enable_debugger
@@ -54,7 +52,7 @@ class RelativeMultiHeadAttentionUnevenSequence(RelativeMultiHeadAttention):
         score = torch.einsum("bihd,bjhd->bijh", queries + self._uvar, keys)
         pos_score = torch.einsum("bihd,jhd->bijh", queries + self._vvar, R)
         score = score + self.rel_shift(pos_score)
-        score = score / d ** 0.5
+        score = score / d**0.5
 
         # causal mask of the same length as the sequence
 
@@ -123,7 +121,7 @@ class Actor(TorchModelV2, nn.Module):
 
         nn.Module.__init__(self)
         self.num_transformer_units = num_transformer_units
-        self.input_gaussian_dim = observation_space.shape[0] - 1 - dimension_size ** 3
+        self.input_gaussian_dim = observation_space.shape[0] - 1 - dimension_size**3
         self.gaussian_dim = gaussian_dim
         self.voxel_dim = voxel_dim
         self.attention_dim = attention_dim
@@ -139,11 +137,12 @@ class Actor(TorchModelV2, nn.Module):
             in_size=self.input_gaussian_dim, out_size=gaussian_dim
         )
         self.input_voxel_layer = SlimFC(
-            in_size=dimension_size ** 3 * len(self.materials), out_size=voxel_dim,
+            in_size=dimension_size**3 * len(self.materials),
+            out_size=voxel_dim,
         )
         self.output_voxel_layer = SlimFC(
             in_size=self.attention_dim,
-            out_size=dimension_size ** 3 * len(self.materials),
+            out_size=dimension_size**3 * len(self.materials),
         )
         self._voxel_out = None
         self._voxel_predict_loss = 0
@@ -227,6 +226,7 @@ class Actor(TorchModelV2, nn.Module):
             data_col=SampleBatch.OBS,
             space=observation_space,
             shift=f"-{self.max_seq_len-2}:1",
+            used_for_compute_actions=False,
         )
         # Setup memory views, (`memory-inference` x past memory outs).
         # if self.memory > 0:
@@ -252,7 +252,7 @@ class Actor(TorchModelV2, nn.Module):
         seq_lens: TensorType,
         return_voxel: bool = False,
     ) -> (TensorType, List[TensorType]):
-        # shape [batch_size, max_seq_len, gaussian_input_dim]
+        # shape [batch_size, max_seq_len, obs_dim]
         time, past_gaussians, past_voxels = self.unpack_observations(
             input_dict["custom_obs"]
         )
@@ -341,7 +341,7 @@ class Actor(TorchModelV2, nn.Module):
             )
         )
         self._voxel_predict_loss = float(voxel_predict_loss)
-        print(f"Voxel prediction loss: {voxel_predict_loss}")
+        # print(f"Voxel prediction loss: {voxel_predict_loss}")
         return [_loss + voxel_predict_loss for _loss in policy_loss]
 
     def unpack_observations(self, observations):
@@ -373,7 +373,8 @@ class Actor(TorchModelV2, nn.Module):
 
     def to_one_hot_voxels(self, all_past_voxels):
         all_past_voxels_one_hot = torch.cat(
-            [all_past_voxels == mat for mat in self.materials], dim=-1,
+            [all_past_voxels == mat for mat in self.materials],
+            dim=-1,
         ).to(dtype=torch.float32)
         # ensure first one is full of zero since it corresponds to <s>
         all_past_voxels_one_hot[:, 0] = 0

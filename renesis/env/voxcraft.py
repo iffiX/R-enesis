@@ -168,7 +168,9 @@ class VoxcraftBaseEnvironment(VectorEnv):
         for model in env_models:
             sizes, representation = model.get_robot()
             robots.append(vxd_creator(sizes, representation, record_history=True))
-
+        if not robots:
+            print("No robots in simulation, skipping")
+            return [], ([], [])
         begin = time()
         for attempt in range(3):
             try:
