@@ -1,19 +1,62 @@
 from renesis.env.voxcraft import VoxcraftGMMObserveWithVoxelEnvironment
 from experiments.gmm_voxcraft_observe_seq_rl.utils import *
 
-dimension = 10
+dimension_size = 10
+materials = (0, 1, 2, 3)
 iters = 400
 steps = 20
 workers = 1
 envs = 512
 rollout = 5
 
+pretrain_config = {
+    "env_config": {
+        "dimension_size": dimension_size,
+        "materials": (0, 1, 2, 3),
+        "max_gaussian_num": 100,
+        "max_steps": steps,
+        "reference_shape": None,
+        "reward_type": "none",
+    },
+    "dataset_path": str(
+        os.path.expanduser("~/data/renesis/pretrain/dataset/pretrain.h5")
+    ),
+    "checkpoint_path": str(os.path.expanduser("~/data/renesis/pretrain/checkpoints")),
+    "log_path": str(os.path.expanduser("~/data/renesis/pretrain/logs")),
+    "lr": 1e-4,
+    "epochs": 100,
+    "seed": 132434,
+    "episode_num_for_train": 100000,
+    "episode_num_for_validate": 100,
+    "dataloader_args": {
+        # "num_workers": 4,
+        # "prefetch_factor": 512,
+        "batch_size": 1024,  # equals to pretrain batch size
+    },
+    "model": {
+        "custom_model": "actor_model",
+        "max_seq_len": steps,
+        "custom_model_config": {
+            "num_transformer_units": 1,
+            "gaussian_dim": 16,
+            "voxel_dim": 112,
+            "attention_dim": 128,
+            "head_dim": 128,
+            "position_wise_mlp_dim": 128,
+            "memory": 0,
+            "num_heads": 1,
+            "dimension_size": dimension_size,
+            "materials": materials,
+        },
+    },
+}
+
 config = {
     "env": VoxcraftGMMObserveWithVoxelEnvironment,
     "env_config": {
         "debug": False,
-        "dimension_size": dimension,
-        "materials": (0, 1, 2, 3),
+        "dimension_size": dimension_size,
+        "materials": materials,
         "max_gaussian_num": steps,
         "max_steps": steps,
         "reward_type": "distance_traveled",
@@ -51,8 +94,8 @@ config = {
         "explore": True,
         "env_config": {
             "debug": False,
-            "dimension_size": dimension,
-            "materials": (0, 1, 2, 3),
+            "dimension_size": dimension_size,
+            "materials": materials,
             "max_gaussian_num": steps,
             "max_steps": steps,
             "reward_type": "distance_traveled",
@@ -78,8 +121,8 @@ config = {
             "position_wise_mlp_dim": 128,
             "memory": 0,
             "num_heads": 1,
-            "dimension_size": dimension,
-            "materials": (0, 1, 2, 3),
+            "dimension_size": dimension_size,
+            "materials": materials,
         },
     },
     "callbacks": CustomCallbacks,

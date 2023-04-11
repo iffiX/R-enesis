@@ -244,13 +244,11 @@ class Actor(TorchModelV2, nn.Module):
         #         )
         print_model_size(self)
 
-    @override(ModelV2)
     def forward(
         self,
         input_dict,
         state: List[TensorType],
         seq_lens: TensorType,
-        return_voxel: bool = False,
     ) -> (TensorType, List[TensorType]):
         # shape [batch_size, max_seq_len, obs_dim]
         time, past_gaussians, past_voxels = self.unpack_observations(
@@ -301,7 +299,7 @@ class Actor(TorchModelV2, nn.Module):
         last_output = all_out[range(len(last)), last, :]
         self._value_out = self.value_out(last_output)
 
-        if return_voxel:
+        if input_dict.get("return_voxel", False):
             out = voxel_mean
         else:
             out = self.action_out(last_output)

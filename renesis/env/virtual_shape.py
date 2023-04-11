@@ -94,7 +94,10 @@ class VirtualShapeBaseEnvironment(gym.Env):
                 # Test notes:
                 # use 1/occurrence is too small for voxels with large quantities
                 weights = np.array(
-                    [occurrence if occurrence > 0 else 0 for occurrence in occurences]
+                    [
+                        1 / np.log(occurrence) if occurrence > 1 else 0
+                        for occurrence in occurences
+                    ]
                 )
                 if self.reward_type == "multi_recall":
                     scores = recall_score(
