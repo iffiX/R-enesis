@@ -28,7 +28,7 @@ def get_gaussian_pdf(mu=0, std=1):
     divider = std * np.sqrt(2 * np.pi)
 
     def gaussian_pdf(x):
-        return np.exp(-((x - mu) ** 2) / (2 * std ** 2)) / divider
+        return np.exp(-((x - mu) ** 2) / (2 * std**2)) / divider
 
     return gaussian_pdf
 
@@ -140,7 +140,8 @@ class CPPN:
 
         features[: self.input_node_num, 1] = 1
         features[
-            self.input_node_num : self.input_node_num + self.output_node_num, 2,
+            self.input_node_num : self.input_node_num + self.output_node_num,
+            2,
         ] = 1
         function_names = list(self.functions.keys())
         for i in range(self.input_node_num + self.output_node_num, len(self.nodes)):
@@ -178,7 +179,9 @@ class CPPN:
 
     @classmethod
     def get_target_node_mask(
-        cls, source_node: int, node_ranks: np.ndarray,
+        cls,
+        source_node: int,
+        node_ranks: np.ndarray,
     ):
         """
         Args:
@@ -331,7 +334,9 @@ class CPPN:
         return unpruned_graph, pruned_graph
 
     def recursive_find_dependent_nodes(
-        self, roots: List[int], mask: List[bool],
+        self,
+        roots: List[int],
+        mask: List[bool],
     ):
         """
         Find all nodes that are connected to an output node.
@@ -435,7 +440,7 @@ class CPPNBaseModel(BaseModel):
             ("sin", wrap_with_aggregator(np.sin)),
             ("gaussian", wrap_with_aggregator(get_gaussian_pdf(0, 1))),
             ("sigmoid", wrap_with_aggregator(lambda x: 1 / (1 + np.exp(-x)))),
-            ("power_square", wrap_with_aggregator(lambda x: x ** 2)),
+            ("power_square", wrap_with_aggregator(lambda x: x**2)),
             ("root_square", wrap_with_aggregator(lambda x: np.sqrt(x))),
             ("agg_sum", wrap_with_aggregator(lambda x: x, lambda x: np.sum(x, axis=0))),
             (
@@ -472,7 +477,7 @@ class CPPNBaseModel(BaseModel):
 
         self.voxels = None
         self.occupied = None
-        self.num_non_zero_voxel = 0
+        self.is_robot_valid = False
         self.update_voxels()
 
     @property
@@ -547,13 +552,17 @@ class CPPNBaseModel(BaseModel):
     def is_finished(self):
         return False
 
-    def is_robot_empty(self):
-        return self.num_non_zero_voxel == 0
+    def is_robot_invalid(self):
+        return not self.is_robot_valid
 
     def step(self, action: np.ndarray):
         # print(action)
         self.cppn.step(
-            int(action[0]), int(action[1]), int(action[2]), int(action[3]), action[4],
+            int(action[0]),
+            int(action[1]),
+            int(action[2]),
+            int(action[3]),
+            action[4],
         )
         self.update_voxels()
         self.steps += 1
@@ -567,6 +576,9 @@ class CPPNBaseModel(BaseModel):
             ]
         )
         return result
+
+    def get_voxels(self):
+        raise NotImplementedError()
 
     def get_robot(self):
         raise NotImplementedError()
@@ -589,44 +601,9 @@ class CPPNBaseModel(BaseModel):
             else None,
         )
 
-    # def get_cppn_reward(self):
-    #     """
-    #     Every connected input/output node has +1 reward.
-    #     Every hidden node not connected to an output node has -1 reward
-    #     """
-    #     node_mask = [True] * (self.cppn.input_node_num + self.cppn.output_node_num) + [
-    #         False
-    #     ] * self.cppn.hidden_node_num
-    #     self.cppn.recursive_find_dependent_nodes(
-    #         list(
-    #             range(
-    #                 self.cppn.input_node_num,
-    #                 self.cppn.input_node_num + self.cppn.output_node_num,
-    #             )
-    #         ),
-    #         node_mask,
-    #     )
-    #     reward = 0
-    #     for i in range(self.cppn.input_node_num):
-    #         if len(self.cppn.out_edges[i]) > 0:
-    #             reward += 1
-    #     for i in range(
-    #         self.cppn.input_node_num,
-    #         self.cppn.input_node_num + self.cppn.output_node_num,
-    #     ):
-    #         if len(self.cppn.in_edges[i]) > 0:
-    #             reward += 1
-    #     # print(f"i/o reward: {reward}")
-    #     for i in range(
-    #         self.cppn.input_node_num + self.cppn.output_node_num, len(self.cppn.nodes)
-    #     ):
-    #         if self.cppn.node_ranks[i] > 0 and not node_mask[i]:
-    #             reward -= 1
-    #     # print(f"i/o + hidden reward: {reward}")
-    #     # print(self.cppn.node_ranks)
-    #     # print(node_mask)
-    #     return reward
-
+    ################################################################################
+    # CPPN specific methods
+    ################################################################################
     def select_action(self):
         node_ranks = self.observe()["node_ranks"]
         source_node_mask = CPPN.get_source_node_mask(node_ranks)
@@ -639,7 +616,8 @@ class CPPNBaseModel(BaseModel):
         has_edge = np.random.choice([0, 1])
         weight = float(np.random.normal(0, 1, 1))
         return np.array(
-            [source_node, target_node, target_function, has_edge, weight], dtype=float,
+            [source_node, target_node, target_function, has_edge, weight],
+            dtype=float,
         )
 
     def update_voxels(self):
@@ -691,6 +669,13 @@ class CPPNBinaryTreeModel(CPPNBaseModel):
             representation.append(layer_representation)
         return (max_x - min_x, max_y - min_y, max_z - min_z), representation
 
+    def get_voxels(self):
+        return (
+            self.voxels
+            if self.voxels is not None
+            else np.zeros([self.dimension_size] * 3, dtype=np.float32)
+        )
+
     def update_voxels(self):
         # generate coordinates
         # Eg: if dimension size is 20, indices are [-10, ..., 9]
@@ -720,7 +705,10 @@ class CPPNBinaryTreeModel(CPPNBaseModel):
             0,
             np.where(outputs[1] < 0.5, 1, np.where(outputs[2] < 0.5, 2, 3)),
         )
-        self.voxels = np.zeros([self.dimension_size] * 3, dtype=float,)
+        self.voxels = np.zeros(
+            [self.dimension_size] * 3,
+            dtype=np.float32,
+        )
         self.voxels[
             coords[:, 0] + self.center_voxel_offset,
             coords[:, 1] + self.center_voxel_offset,
@@ -731,13 +719,9 @@ class CPPNBinaryTreeModel(CPPNBaseModel):
         # print("voxels:")
         # print(self.voxels)
         self.occupied = self.voxels[:, :, :] != 0
-
-        if is_voxel_continuous(self.occupied):
-            self.num_non_zero_voxel = np.sum(self.occupied.astype(int))
-        else:
-            self.voxels = np.zeros_like(self.voxels)
-            self.occupied = np.zeros_like(self.occupied)
-            self.num_non_zero_voxel = 0
+        self.is_robot_valid = is_voxel_continuous(self.occupied) and np.any(
+            self.occupied
+        )
 
 
 class CPPNBinaryTreeWithPhaseOffsetModel(CPPNBaseModel):
@@ -788,6 +772,13 @@ class CPPNBinaryTreeWithPhaseOffsetModel(CPPNBaseModel):
             representation.append(layer_representation)
         return (max_x - min_x, max_y - min_y, max_z - min_z), representation
 
+    def get_voxels(self):
+        return (
+            self.voxels[0]
+            if self.voxels is not None
+            else np.zeros([self.dimension_size] * 3, dtype=np.float32)
+        )
+
     def update_voxels(self):
         # generate coordinates
         # Eg: if dimension size is 20, indices are [-10, ..., 9]
@@ -812,8 +803,15 @@ class CPPNBinaryTreeWithPhaseOffsetModel(CPPNBaseModel):
         outputs = self.cppn.eval(inputs)
         outputs = [sigmoid(outputs[0]), sigmoid(outputs[1]), outputs[2]]
 
-        material = np.where(outputs[0] < 0.5, 0, np.where(outputs[1] < 0.5, 1, 2),)
-        self.voxels = np.zeros([self.dimension_size] * 3 + [2], dtype=float,)
+        material = np.where(
+            outputs[0] < 0.5,
+            0,
+            np.where(outputs[1] < 0.5, 1, 2),
+        )
+        self.voxels = np.zeros(
+            [self.dimension_size] * 3 + [2],
+            dtype=np.float32,
+        )
         self.voxels[
             coords[:, 0] + self.center_voxel_offset,
             coords[:, 1] + self.center_voxel_offset,
@@ -824,13 +822,9 @@ class CPPNBinaryTreeWithPhaseOffsetModel(CPPNBaseModel):
         # print("voxels:")
         # print(self.voxels)
         self.occupied = self.voxels[:, :, :, 0] != 0
-
-        if is_voxel_continuous(self.occupied):
-            self.num_non_zero_voxel = np.sum(self.occupied.astype(int))
-        else:
-            self.voxels = np.zeros_like(self.voxels)
-            self.occupied = np.zeros_like(self.occupied)
-            self.num_non_zero_voxel = 0
+        self.is_robot_valid = is_voxel_continuous(self.occupied) and np.any(
+            self.occupied
+        )
 
 
 class CPPNVirtualShapeBinaryTreeModel(CPPNBinaryTreeModel):

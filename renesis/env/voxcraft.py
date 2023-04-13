@@ -128,11 +128,11 @@ class VoxcraftBaseEnvironment(VectorEnv):
         valid_model_indices = []
         empty_count = 0
         for idx, (model, finished) in enumerate(zip(self.env_models, all_finished)):
-            if not model.is_robot_empty() and not finished:
+            if not model.is_robot_invalid() and not finished:
                 valid_models.append(model)
                 valid_model_indices.append(idx)
 
-            if model.is_robot_empty() and not finished:
+            if model.is_robot_invalid() and not finished:
                 empty_count += 1
                 rewards[idx] = 0
                 self.previous_robots[idx] = "\n"

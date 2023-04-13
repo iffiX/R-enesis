@@ -59,7 +59,6 @@ class GrowthModel(BaseModel):
         self.occupied = None
         self.occupied_non_zero_positions = []
         self.occupied_non_zero_values = []
-        self.num_non_zero_voxel = 0
         self.num_voxels = 0
         self.body = None
 
@@ -80,12 +79,11 @@ class GrowthModel(BaseModel):
     def reset(self):
         self.voxels = np.zeros(
             [self.actual_dimension_size] * 3 + [1 + len(self.actuation_features)],
-            dtype=float,
+            dtype=np.float32,
         )
         self.occupied = np.zeros([self.actual_dimension_size] * 3, dtype=bool)
         self.occupied_non_zero_positions = []
         self.occupied_non_zero_values = []
-        self.num_non_zero_voxel = 0
         self.num_voxels = 0
         self.steps = 0
         self.body = deque([])
@@ -98,8 +96,8 @@ class GrowthModel(BaseModel):
     def is_finished(self):
         return len(self.body) == 0
 
-    def is_robot_empty(self):
-        return self.num_non_zero_voxel == 0
+    def is_robot_invalid(self):
+        return not np.any(self.occupied)
 
     def step(self, action: np.ndarray):
         configuration = sigmoid(action.reshape(self.action_shape))
@@ -195,6 +193,13 @@ class GrowthModel(BaseModel):
             representation.append(layer_representation)
         return (max_x - min_x, max_y - min_y, max_z - min_z), representation
 
+    def get_voxels(self):
+        return (
+            self.voxels[0]
+            if self.voxels is not None
+            else np.zeros([self.actual_dimension_size] * 3, dtype=np.float32)
+        )
+
     def mask_configuration(self, configuration: np.ndarray):
         """
         Mask invalid configuration in the current step
@@ -257,32 +262,44 @@ class GrowthModel(BaseModel):
             actuation = configuration[direction, material, 1:]
             if direction == 0:
                 self.create_new_voxel(
-                    current_voxel + np.asarray((-1, 0, 0)), material, actuation,
+                    current_voxel + np.asarray((-1, 0, 0)),
+                    material,
+                    actuation,
                 )
 
             elif direction == 1:
                 self.create_new_voxel(
-                    current_voxel + np.asarray((1, 0, 0)), material, actuation,
+                    current_voxel + np.asarray((1, 0, 0)),
+                    material,
+                    actuation,
                 )
 
             elif direction == 2:
                 self.create_new_voxel(
-                    current_voxel + np.asarray((0, -1, 0)), material, actuation,
+                    current_voxel + np.asarray((0, -1, 0)),
+                    material,
+                    actuation,
                 )
 
             elif direction == 3:
                 self.create_new_voxel(
-                    current_voxel + np.asarray((0, 1, 0)), material, actuation,
+                    current_voxel + np.asarray((0, 1, 0)),
+                    material,
+                    actuation,
                 )
 
             elif direction == 4:
                 self.create_new_voxel(
-                    current_voxel + np.asarray((0, 0, -1)), material, actuation,
+                    current_voxel + np.asarray((0, 0, -1)),
+                    material,
+                    actuation,
                 )
 
             elif direction == 5:
                 self.create_new_voxel(
-                    current_voxel + np.asarray((0, 0, 1)), material, actuation,
+                    current_voxel + np.asarray((0, 0, 1)),
+                    material,
+                    actuation,
                 )
 
     def create_new_voxel(
@@ -305,7 +322,6 @@ class GrowthModel(BaseModel):
         if material != 0:
             self.occupied_non_zero_positions.append(coordinates.tolist())
             self.occupied_non_zero_values.append(material)
-            self.num_non_zero_voxel += 1
             if len(self.actuation_features) > 0:
                 self.voxels[
                     coordinates[0], coordinates[1], coordinates[2], 1:

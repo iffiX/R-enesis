@@ -36,11 +36,32 @@ def render(history):
 
 
 class CustomCallbacks(DefaultCallbacks):
+    def on_algorithm_init(
+        self,
+        *,
+        algorithm: "Algorithm",
+        **kwargs,
+    ) -> None:
+        load_pretrain_path = algorithm.config.get("weight_export_path", None)
+        if load_pretrain_path is not None:
+            algorithm.workers.local_worker().get_policy().set_weights(
+                t.load(load_pretrain_path)
+            )
+            algorithm.workers.sync_weights()
+            print("Pretrain weights loaded")
+
     def on_episode_start(self, *, worker, base_env, policies, episode, **kwargs):
         episode.media["episode_data"] = {}
 
     def on_episode_end(
-        self, *, worker, base_env, policies, episode, env_index, **kwargs,
+        self,
+        *,
+        worker,
+        base_env,
+        policies,
+        episode,
+        env_index,
+        **kwargs,
     ):
         # Check if there are multiple episodes in a batch, i.e.
         # "batch_mode": "truncate_episodes".
@@ -61,7 +82,14 @@ class CustomCallbacks(DefaultCallbacks):
         #     env_index
         # ]
 
-    def on_train_result(self, *, algorithm, result, trainer, **kwargs,) -> None:
+    def on_train_result(
+        self,
+        *,
+        algorithm,
+        result,
+        trainer,
+        **kwargs,
+    ) -> None:
         # Remove non-evaluation data
         result["episode_media"] = {}
         if "sampler_results" in result:

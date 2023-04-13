@@ -52,7 +52,7 @@ class GMMModel(BaseModel):
         self.gaussians = []  # type: List[np.ndarray]
         self.voxels = None
         self.occupied = None
-        self.num_non_zero_voxel = 0
+        self.is_robot_valid = False
         self.update_voxels()
 
     @property
@@ -72,8 +72,8 @@ class GMMModel(BaseModel):
     def is_finished(self):
         return False
 
-    def is_robot_empty(self):
-        return self.num_non_zero_voxel == 0
+    def is_robot_invalid(self):
+        return not self.is_robot_valid
 
     def step(self, action: np.ndarray):
         # print(action)
@@ -117,6 +117,13 @@ class GMMModel(BaseModel):
             )
             representation.append(layer_representation)
         return (max_x - min_x, max_y - min_y, max_z - min_z), representation
+
+    def get_voxels(self):
+        return (
+            self.voxels
+            if self.voxels is not None
+            else np.zeros([self.dimension_size] * 3, dtype=np.float32)
+        )
 
     def get_state_data(self):
         return np.stack(self.gaussians)
@@ -204,13 +211,9 @@ class GMMModel(BaseModel):
         # print("voxels:")
         # print(self.voxels)
         self.occupied = self.voxels[:, :, :] != 0
-
-        if is_voxel_continuous(self.occupied):
-            self.num_non_zero_voxel = np.sum(self.occupied.astype(int))
-        else:
-            self.voxels = np.zeros_like(self.voxels)
-            self.occupied = np.zeros_like(self.occupied)
-            self.num_non_zero_voxel = 0
+        self.is_robot_valid = is_voxel_continuous(self.occupied) and np.any(
+            self.occupied
+        )
 
 
 class GMMObserveWithVoxelModel(GMMModel):
@@ -222,6 +225,7 @@ class GMMObserveWithVoxelModel(GMMModel):
         cutoff=1e-2,
     ):
         super().__init__(materials, dimension_size, max_gaussian_num, cutoff)
+        self.prev_voxels = np.zeros([self.dimension_size**3], dtype=np.float32)
 
     @property
     def observation_space(self):
@@ -230,29 +234,6 @@ class GMMObserveWithVoxelModel(GMMModel):
         # See:
         # https://github.com/ray-project/ray/blob/
         # 5b99dd9b79d8e1d26b0254ab2f3d270331369a0e/rllib/policy/policy.py#L1513
-
-        # return Dict(
-        #     OrderedDict(
-        #         [
-        #             (
-        #                 "gaussian",
-        #                 Box(
-        #                     low=0,
-        #                     high=1,
-        #                     shape=(6 + len(self.materials),),
-        #                 ),
-        #             ),
-        #             (
-        #                 "voxels",
-        #                 Box(
-        #                     low=0,
-        #                     high=len(self.materials) - 1,
-        #                     shape=(self.dimension_size,) * 3,
-        #                 ),
-        #             ),
-        #         ]
-        #     )
-        # )
 
         return Box(
             low=np.zeros(
@@ -267,31 +248,32 @@ class GMMObserveWithVoxelModel(GMMModel):
             ),
         )
 
-    def observe(self):
-        # return OrderedDict(
-        #     [
-        #         ("gaussian", super().observe()),
-        #         (
-        #             "voxels",
-        #             self.voxels
-        #             if self.voxels is not None
-        #             else np.zeros(
-        #                 [self.dimension_size] * 3,
-        #                 dtype=float,
-        #             ),
-        #         ),
-        #     ]
-        # )
-        voxels = (
+    def step(self, action: np.ndarray):
+        self.prev_voxels = (
             self.voxels
             if self.voxels is not None
             else np.zeros([self.dimension_size**3], dtype=np.float32)
         )
+        super().step(action)
+
+    def observe(self):
+        # V: voxels, a: action
+        # Let an n step episode be:
+        # V_0 --a_0--> V_1 --a_1--> V_2 ... V_n-1 --a_n-1-->V_n
+        # Then:
+        # obs_0 = 0
+        # obs_1 = (1, a_0, V_0)
+        # obs_2 = (2, a_1, V_1)
+        # ...
+        # This is the observation used to generate the last action a_n-1
+        # obs_n-1 = (n-1, a_n-2, V_n-2)
+        # This is the last observation after applying the last action a_n-1
+        # obs_n = (n, a_n-1, V_n-1)
         return np.concatenate(
             [
                 np.array([len(self.gaussians)], dtype=np.float32),
                 super().observe(),
-                voxels.reshape(-1),
+                self.prev_voxels.reshape(-1),
             ],
             axis=0,
         )

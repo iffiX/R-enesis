@@ -73,7 +73,9 @@ class RelativeMultiHeadAttentionUnevenSequence(RelativeMultiHeadAttention):
                 dtype=score.dtype,
             ).to(score.device)
             masks.append(sub_mask)
-        mask = torch.stack(masks, dim=0).view(score.shape)
+        mask_shape = list(score.shape)
+        mask_shape[-1] = 1
+        mask = torch.stack(masks, dim=0).view(mask_shape)
 
         masked_score = score * mask + 1e30 * (mask.float() - 1.0)
         wmat = nn.functional.softmax(masked_score, dim=2) * mask
@@ -256,17 +258,18 @@ class Actor(TorchModelV2, nn.Module):
         )
 
         # First observation corresponds to special start token
-        past_gaussians = self.reorder_observation(past_gaussians, time, left_shift=1)
+        past_gaussians = self.reorder_observation(past_gaussians, time)
         # Note: the last dimension is ordered by material first, then by voxel dimensions
         # shape [batch_size, max_seq_len, material_num * dimension_size ** 3]
-        past_voxels = self.to_one_hot_voxels(
-            self.reorder_observation(past_voxels, time)
+        past_voxels_one_hot = self.to_one_hot_voxels(
+            self.reorder_observation(past_voxels, time),
+            time,
         )
 
         all_out = torch.cat(
             (
                 self.input_gaussian_layer(past_gaussians),
-                self.input_voxel_layer(past_voxels),
+                self.input_voxel_layer(past_voxels_one_hot),
             ),
             dim=2,
         )
@@ -319,22 +322,22 @@ class Actor(TorchModelV2, nn.Module):
     def custom_loss(
         self, policy_loss: List[TensorType], loss_inputs: Dict[str, TensorType]
     ) -> List[TensorType]:
-        time, _, next_past_voxels = self.unpack_observations(
+        next_time, _, next_past_voxels = self.unpack_observations(
             loss_inputs["custom_next_obs"]
         )
 
-        next_past_voxels = self.reorder_observation(next_past_voxels, time)
-        next_past_voxels = self.to_one_hot_voxels(next_past_voxels).to(
-            policy_loss[0].device
-        )
+        next_past_voxels = self.reorder_observation(next_past_voxels, next_time)
+        next_past_voxels_one_hot = self.to_one_hot_voxels(
+            next_past_voxels, next_time
+        ).to(policy_loss[0].device)
         voxel_predict_loss = torch.mean(
             torch.stack(
                 [
                     nn.functional.mse_loss(
-                        self._voxel_out[:, : 1 + int(l)],
-                        next_past_voxels[:, : 1 + int(l)],
+                        self._voxel_out[:, : int(t)],
+                        next_past_voxels_one_hot[:, : int(t)],
                     )
-                    for l in time
+                    for t in next_time
                 ]
             )
         )
@@ -352,31 +355,32 @@ class Actor(TorchModelV2, nn.Module):
             observations[:, :, 1 + self.input_gaussian_dim :],
         )
 
-    def reorder_observation(self, observation, T, left_shift=0):
+    def reorder_observation(self, observation, time):
         # Since ray will add padding to the left, we have to cut the left
         # padding off and add it to the right side.
 
         # observation shape [batch_size, max_seq_len, ...]
         # T starts at 0 for first step.
         result = []
-        for idx, t in enumerate(T):
-            padding = observation[idx, : self.max_seq_len - int(t) - left_shift]
-            real_observation = observation[
-                idx, self.max_seq_len - int(t) - left_shift :
-            ]
+        for idx, t in enumerate(time):
+            padding = observation[idx, : self.max_seq_len - int(t) - 1]
+            real_observation = observation[idx, self.max_seq_len - int(t) - 1 :]
             # Add padding to the right.
             result.append(torch.cat([real_observation, padding], dim=0))
 
         return torch.stack(result)
 
-    def to_one_hot_voxels(self, all_past_voxels):
-        all_past_voxels_one_hot = torch.cat(
-            [all_past_voxels == mat for mat in self.materials],
+    def to_one_hot_voxels(self, voxels, time=None):
+        voxels_one_hot = torch.cat(
+            [voxels == mat for mat in self.materials],
             dim=-1,
         ).to(dtype=torch.float32)
-        # ensure first one is full of zero since it corresponds to <s>
-        all_past_voxels_one_hot[:, 0] = 0
-        return all_past_voxels_one_hot
+
+        if time is not None:
+            # Fill remaining slots outside of time length as zero
+            for idx, t in enumerate(time):
+                voxels_one_hot[idx, int(t) + 1 :] = 0
+        return voxels_one_hot
 
 
 ModelCatalog.register_custom_model("actor_model", Actor)

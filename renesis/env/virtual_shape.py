@@ -67,7 +67,9 @@ class VirtualShapeBaseEnvironment(gym.Env):
             classification problem. Returns the weighted score.
         """
         reward = None
-        if self.reward_type == "none":
+        if self.env_model.is_robot_invalid():
+            reward = 0
+        elif self.reward_type == "none":
             reward = 0
         elif not self.reward_type.startswith("multi_"):
             correct_num = np.sum(
@@ -85,47 +87,42 @@ class VirtualShapeBaseEnvironment(gym.Env):
                 precision = correct_num / (np.sum(self.env_model.voxels != 0) + 1e-3)
                 reward = 20 * precision * recall / (precision + recall + 1e-3)
         else:
-            if self.env_model.is_robot_empty():
-                reward = 0
-            else:
-                occurences = [
-                    np.sum(self.reference_shape == mat) for mat in self.materials
+            occurences = [np.sum(self.reference_shape == mat) for mat in self.materials]
+            # Test notes:
+            # use 1/occurrence is too small for voxels with large quantities
+            weights = np.array(
+                [
+                    1 / np.log(occurrence) if occurrence > 1 else 0
+                    for occurrence in occurences
                 ]
-                # Test notes:
-                # use 1/occurrence is too small for voxels with large quantities
-                weights = np.array(
-                    [
-                        1 / np.log(occurrence) if occurrence > 1 else 0
-                        for occurrence in occurences
-                    ]
+            )
+            if self.reward_type == "multi_recall":
+                scores = recall_score(
+                    self.reference_shape.reshape(-1),
+                    self.env_model.voxels.reshape(-1),
+                    labels=self.env_model.materials,
+                    average=None,
+                    zero_division=0,
                 )
-                if self.reward_type == "multi_recall":
-                    scores = recall_score(
-                        self.reference_shape.reshape(-1),
-                        self.env_model.voxels.reshape(-1),
-                        labels=self.env_model.materials,
-                        average=None,
-                        zero_division=0,
-                    )
-                    reward = 10 * np.average(scores, weights=weights)
-                elif self.reward_type == "multi_precision":
-                    scores = precision_score(
-                        self.reference_shape.reshape(-1),
-                        self.env_model.voxels.reshape(-1),
-                        labels=self.env_model.materials,
-                        average=None,
-                        zero_division=0,
-                    )
-                    reward = 10 * np.average(scores, weights=weights)
-                elif self.reward_type == "multi_f1":
-                    scores = f1_score(
-                        self.reference_shape.reshape(-1),
-                        self.env_model.voxels.reshape(-1),
-                        labels=self.env_model.materials,
-                        average=None,
-                        zero_division=0,
-                    )
-                    reward = 10 * np.average(scores, weights=weights)
+                reward = 10 * np.average(scores, weights=weights)
+            elif self.reward_type == "multi_precision":
+                scores = precision_score(
+                    self.reference_shape.reshape(-1),
+                    self.env_model.voxels.reshape(-1),
+                    labels=self.env_model.materials,
+                    average=None,
+                    zero_division=0,
+                )
+                reward = 10 * np.average(scores, weights=weights)
+            elif self.reward_type == "multi_f1":
+                scores = f1_score(
+                    self.reference_shape.reshape(-1),
+                    self.env_model.voxels.reshape(-1),
+                    labels=self.env_model.materials,
+                    average=None,
+                    zero_division=0,
+                )
+                reward = 10 * np.average(scores, weights=weights)
 
         if reward is None:
             raise Exception(f"Unknown reward type: {self.reward_type}")

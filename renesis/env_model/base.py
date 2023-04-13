@@ -28,12 +28,15 @@ class BaseModel(ABC):
 
     @abstractmethod
     def is_finished(self):
-        """Returns True if there is no more changes to be applied."""
+        """Returns True if there is no more changes that can be applied."""
         raise NotImplementedError()
 
     @abstractmethod
-    def is_robot_empty(self):
-        """Returns True if robot has at no voxels."""
+    def is_robot_invalid(self):
+        """
+        Returns True if robot is invalid (no voxels, not continuous, etc.)
+        Environment may use this to set the fitness (reward) score.
+        """
         raise NotImplementedError()
 
     def step(self, action):
@@ -48,7 +51,9 @@ class BaseModel(ABC):
 
     def get_robot(self):
         """
-        Returns the current robot, in voxels.
+        Returns the current robot for creating a voxcraft simulation. Different
+        environments may support different representations, some only returns
+        material, some others return amplitude, frequency, etc.
 
         Returns:
             sizes:
@@ -60,7 +65,17 @@ class BaseModel(ABC):
             is a list of length x*y, where x and y are the bounding box sizes
             of all voxels.
         """
-        raise NotImplementedError
+        raise NotImplementedError()
+
+    def get_voxels(self):
+        """
+        Returns:
+            A three dimensional numpy array of shape
+            [dimension_size, dimension_size, dimension_size]
+            and dtype np.float32 specifying the voxel placement,
+            0 corresponds to empty.
+        """
+        raise NotImplementedError()
 
     def get_state_data(self):
         """

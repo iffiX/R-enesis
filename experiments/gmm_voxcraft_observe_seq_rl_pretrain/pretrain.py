@@ -79,11 +79,10 @@ class PretrainDatasetGenerator:
             )
 
             observation_space = env.observation_space
-            action_space = env.action_space
             expected_size = (
                 (episode_num_for_train + episode_num_for_validate)
                 * steps
-                * (1 + action_space.shape[0] + observation_space.shape[0])
+                * observation_space.shape[0]
                 * 4
                 / 1024**2
             )
@@ -92,11 +91,8 @@ class PretrainDatasetGenerator:
                 file.attrs["steps"] = steps
                 file.attrs["dimension_size"] = dimension_size
                 file.attrs["materials"] = str(materials)
-                file.attrs["action_space_size"] = action_space.shape[0]
-                file.attrs["observation_space_size"] = observation_space.shape[0]
                 # Last dimension stores the step number, the action and the
-                # observation after that action. The initial observation is
-                # omitted since it's always zero.
+                # voxels before that action.
                 # The step number starts at 0, For episodes shorter than steps,
                 # the step number will be -1 for uninitialized actions and
                 # observations.
@@ -108,13 +104,13 @@ class PretrainDatasetGenerator:
                         split,
                         shape=(
                             split_episode_num,
-                            steps,
-                            1 + action_space.shape[0] + observation_space.shape[0],
+                            1 + steps,
+                            observation_space.shape[0],
                         ),
                         chunks=(
                             100,
-                            20,
-                            1 + action_space.shape[0] + observation_space.shape[0],
+                            1 + steps,
+                            observation_space.shape[0],
                         ),
                         dtype=np.float32,
                     )
@@ -161,19 +157,17 @@ class PretrainDatasetGenerator:
     def fill_data_worker(seed):
         env, steps, *_ = PretrainDatasetGeneratorParallelContext.worker_data
 
-        episode = np.zeros(
-            [steps, 1 + env.action_space.shape[0] + env.observation_space.shape[0]]
-        )
+        episode = np.zeros([1 + steps, env.observation_space.shape[0]])
+        # Set time step of non-initialized step records to -1
         episode[:, 0] = -1
         rand = np.random.RandomState(seed)
-        env.reset()
+        obs = env.reset()
+        episode[0] = obs
         for step in range(steps):
             # TODO: find an appropriate way to generate this
             action = rand.rand(*env.action_space.shape) * 4 - 2
             obs, _, done, __ = env.step(action)
-            episode[step] = np.concatenate(
-                [np.array([step], dtype=np.float32), action, obs], axis=0
-            )
+            episode[step + 1] = obs
             if done:
                 break
         return episode
@@ -264,82 +258,6 @@ class PretrainDatasetGenerator:
             )
 
 
-# class PretrainDataset(Dataset):
-#     def __init__(self, dataset_path, split):
-#         self.file = h5py.File(dataset_path, mode="r", rdcc_nbytes=1024**3)
-#         self.dataset = self.file[split]
-#
-#         self.steps = self.file.attrs["steps"]
-#         self.dimension_size = self.file.attrs["dimension_size"]
-#         self.action_space_size = self.file.attrs["action_space_size"]
-#         self.observation_space_size = self.file.attrs["observation_space_size"]
-#
-#         self.index = []
-#         step_num = self.dataset[:, :, 0]
-#         for episode in range(self.dataset.shape[0]):
-#             for step in range(self.dataset.shape[1]):
-#                 if step_num[episode, step] != -1:
-#                     self.index.append((episode, step))
-#
-#     def __len__(self):
-#         return len(self.index)
-#
-#     def __getitem__(self, item):
-#         episode, step = self.index[item]
-#         all_past_obs = np.zeros(
-#             [self.steps, self.observation_space_size], dtype=np.float32
-#         )
-#         predict_voxels = np.zeros(
-#             [self.steps, self.dimension_size**3], dtype=np.float32
-#         )
-#         if step > 0:
-#             all_past_obs[-step:] = self.dataset[
-#                 episode, :step, 1 + self.action_space_size :
-#             ]
-#         predict_voxels[-(step + 1) :] = self.dataset[
-#             episode, : step + 1, -self.dimension_size**3 :
-#         ]
-#         return all_past_obs, predict_voxels
-
-
-# class PretrainDataset(Dataset):
-#     def __init__(self, dataset_path, split):
-#         with h5py.File(dataset_path, mode="r") as file:
-#             self.dataset = file[split][:]
-#
-#             self.steps = file.attrs["steps"]
-#             self.dimension_size = file.attrs["dimension_size"]
-#             self.action_space_size = file.attrs["action_space_size"]
-#             self.observation_space_size = file.attrs["observation_space_size"]
-#
-#             self.index = []
-#             step_num = self.dataset[:, :, 0]
-#             for episode in range(self.dataset.shape[0]):
-#                 for step in range(self.dataset.shape[1]):
-#                     if step_num[episode, step] != -1:
-#                         self.index.append((episode, step))
-#
-#     def __len__(self):
-#         return len(self.index)
-#
-#     def __getitem__(self, item):
-#         episode, step = self.index[item]
-#         all_past_obs = np.zeros(
-#             [self.steps, self.observation_space_size], dtype=np.float32
-#         )
-#         predict_voxels = np.zeros(
-#             [self.steps, self.dimension_size**3], dtype=np.float32
-#         )
-#         if step > 0:
-#             all_past_obs[-step:] = self.dataset[
-#                 episode, :step, 1 + self.action_space_size :
-#             ]
-#         predict_voxels[-(step + 1) :] = self.dataset[
-#             episode, : step + 1, -self.dimension_size**3 :
-#         ]
-#         return all_past_obs, predict_voxels
-
-
 class PretrainDataset(Dataset):
     def __init__(self, dataset_path, split):
         with h5py.File(dataset_path, mode="r") as file:
@@ -348,13 +266,12 @@ class PretrainDataset(Dataset):
             print("Loaded")
             self.steps = file.attrs["steps"]
             self.dimension_size = file.attrs["dimension_size"]
-            self.action_space_size = file.attrs["action_space_size"]
-            self.observation_space_size = file.attrs["observation_space_size"]
+            self.observation_space_size = self.dataset.shape[-1]
 
             self.index = []
             step_num = self.dataset[:, :, 0]
             for episode in range(self.dataset.shape[0]):
-                for step in range(self.dataset.shape[1]):
+                for step in range(self.dataset.shape[1] - 1):
                     if step_num[episode, step] != -1:
                         self.index.append((episode, step))
 
@@ -363,20 +280,27 @@ class PretrainDataset(Dataset):
 
     def __getitem__(self, item):
         episode, step = self.index[item]
-        all_past_obs = t.zeros(
+        past_obs = t.zeros(
             [self.steps, self.observation_space_size], dtype=t.float32, device="cuda:0"
         )
         predict_voxels = t.zeros(
             [self.steps, self.dimension_size**3], dtype=t.float32, device="cuda:0"
         )
-        if step > 0:
-            all_past_obs[-step:] = self.dataset[
-                episode, :step, 1 + self.action_space_size :
-            ]
-        predict_voxels[-(step + 1) :] = self.dataset[
-            episode, : step + 1, -self.dimension_size**3 :
+        # For past_obs, pad it to the left to make it consistent with the
+        # ray trajectory view output
+        # i.e. Suppose steps = 10, t=3, (t is step, t starts at 0) the observation is like:
+        # [0, 0, 0, 0, 0, 0, obs_0, obs_1, obs_2, obs_3]
+        # and obs_0 = 0
+        past_obs[-(step + 1) :] = self.dataset[episode, : step + 1]
+
+        # Since input is reordered in the model internally as:
+        # [obs_0, obs_1, obs_2, obs_3, 0, 0, 0, 0, 0, 0]
+        # Prediction target is
+        # [obs_1, obs_2, obs_3, obs_4, 0, 0, 0, 0, 0, 0]
+        predict_voxels[: step + 1] = self.dataset[
+            episode, 1 : step + 2, -self.dimension_size**3 :
         ]
-        return all_past_obs, predict_voxels
+        return past_obs, predict_voxels, step
 
 
 class Pretrainer(pl.LightningModule):
@@ -423,33 +347,37 @@ class Pretrainer(pl.LightningModule):
         )
 
     def training_step(self, batch, batch_idx):
-        all_past_obs, predict_voxels = batch
+        past_obs, predict_voxels, time = batch
         predicted_voxels_one_hot_mean, *_ = self.model(
             {
-                "obs": all_past_obs[:, -1].to(
+                "obs": past_obs[:, -1].to(
                     self.device
                 ),  # dummy input, make ray model not complain
-                "custom_obs": all_past_obs.to(self.device),
+                "custom_obs": past_obs.to(self.device),
                 "return_voxel": True,
             },
             None,
             None,
         )
+        # loss = F.binary_cross_entropy(
+        #     t.sigmoid(predicted_voxels_one_hot_mean),
+        #     self.model.to_one_hot_voxels(predict_voxels, time=time).to(self.device),
+        # )
         loss = F.mse_loss(
             predicted_voxels_one_hot_mean,
-            self.model.to_one_hot_voxels(predict_voxels).to(self.device),
+            self.model.to_one_hot_voxels(predict_voxels, time=time).to(self.device),
         )
         return loss
 
     def validation_step(self, batch, batch_idx):
-        all_past_obs, predict_voxels = batch
-        predict_voxels = predict_voxels[:, -1]
+        past_obs, predict_voxels, time = batch
+        predict_voxels = predict_voxels[range(len(time)), time]
         predicted_voxels_one_hot_mean, *_ = self.model(
             {
-                "obs": all_past_obs[:, -1].to(
+                "obs": past_obs[:, -1].to(
                     self.device
                 ),  # dummy input, make ray model not complain
-                "custom_obs": all_past_obs.to(self.device),
+                "custom_obs": past_obs.to(self.device),
                 "return_voxel": True,
             },
             None,
@@ -457,7 +385,7 @@ class Pretrainer(pl.LightningModule):
         )
         # Only compare the last predicted voxels
         last_predicted_voxels = t.argmax(
-            predicted_voxels_one_hot_mean[:, -1].reshape(
+            predicted_voxels_one_hot_mean[range(len(time)), time].reshape(
                 predicted_voxels_one_hot_mean.shape[0], len(self.model.materials), -1
             ),
             dim=1,
@@ -524,7 +452,10 @@ if __name__ == "__main__":
         deterministic=True,
         precision=32,
     )
-    trainer.stage_mode = "train"
     trainer.fit(pretrainer)
     pretrainer.load_from_checkpoint(checkpoint_callback.best_model_path)
-    t.save(pretrainer.model.state_dict(), "~/data/renesis/pretrain/result/model.pt")
+    # pretrainer.load_from_checkpoint(
+    #     "/home/iffi/data/renesis/pretrain/checkpoints/epoch=09-f1-f1=0.801.ckpt"
+    # )
+    os.makedirs(os.path.dirname(pretrain_config["weight_export_path"]), exist_ok=True)
+    t.save(pretrainer.model.state_dict(), pretrain_config["weight_export_path"])
