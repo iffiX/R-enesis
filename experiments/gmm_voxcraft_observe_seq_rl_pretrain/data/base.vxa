@@ -25,7 +25,7 @@
 	<Environment>
         <Thermal>
             <TempEnabled>1</TempEnabled>
-            <TempAmplitude>5</TempAmplitude>
+            <TempAmplitude>20</TempAmplitude>
             <VaryTempEnabled>1</VaryTempEnabled>
             <TempPeriod>.25</TempPeriod>
         </Thermal>
@@ -44,8 +44,8 @@
             <Name>Body</Name>
             <Display>
                 <Red>0</Red>
-                <Green>1</Green>
-                <Blue>0</Blue>
+                <Green>0</Green>
+                <Blue>1</Blue>
                 <Alpha>0.75</Alpha>
             </Display>
             <Mechanical>
@@ -63,8 +63,8 @@
     	<Material ID="2">
             <Name>Motor1</Name>
             <Display>
-                <Red>1</Red>
-                <Green>0</Green>
+                <Red>0</Red>
+                <Green>1</Green>
                 <Blue>0</Blue>
                 <Alpha>0.75</Alpha>
             </Display>

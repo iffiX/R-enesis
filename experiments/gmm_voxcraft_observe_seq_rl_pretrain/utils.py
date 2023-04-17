@@ -6,7 +6,9 @@ import torch as t
 from ray.tune.logger import LoggerCallback
 from ray.tune.result import TIMESTEPS_TOTAL, TRAINING_ITERATION
 from ray.rllib.algorithms.callbacks import DefaultCallbacks
-from renesis.env.voxcraft import VoxcraftGMMEnvironment
+from renesis.env.voxcraft import (
+    VoxcraftSingleRewardGMMObserveWithVoxelAndRemainingStepsEnvironment,
+)
 from renesis.utils.media import create_video_subproc
 from renesis.sim import Voxcraft, VXHistoryRenderer
 from launch.snapshot import get_snapshot
@@ -74,13 +76,14 @@ class CustomCallbacks(DefaultCallbacks):
                 "after episode is done!"
             )
 
-        env = base_env.vector_env  # type: VoxcraftGMMEnvironment
-        episode.media["episode_data"]["reward"] = env.previous_best_rewards[env_index]
-        episode.media["episode_data"]["robot"] = env.previous_best_robots[env_index]
+        env = (
+            base_env.vector_env
+        )  # type: VoxcraftSingleRewardGMMObserveWithVoxelAndRemainingStepsEnvironment
+        episode.media["episode_data"]["reward"] = env.end_rewards[env_index]
+        episode.media["episode_data"]["robot"] = env.end_robots[env_index]
+        episode.custom_metrics["real_reward"] = env.end_rewards[env_index]
         # May be also record state data (gaussians) ?
-        # episode.media["episode_data"]["state_data"] = env.previous_best_state_data[
-        #     env_index
-        # ]
+        # episode.media["episode_data"]["state_data"] = env.end_state_data[env_index]
 
     def on_train_result(
         self,
@@ -92,6 +95,8 @@ class CustomCallbacks(DefaultCallbacks):
     ) -> None:
         # Remove non-evaluation data
         result["episode_media"] = {}
+        print("Custom metrics:")
+        print(result["custom_metrics"])
         if "sampler_results" in result:
             result["sampler_results"]["episode_media"] = {}
 

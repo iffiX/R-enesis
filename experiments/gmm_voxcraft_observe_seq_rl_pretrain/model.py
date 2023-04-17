@@ -259,12 +259,10 @@ class Actor(TorchModelV2, nn.Module):
 
         # First observation corresponds to special start token
         past_gaussians = self.reorder_observation(past_gaussians, time)
+        past_voxels = self.reorder_observation(past_voxels, time)
         # Note: the last dimension is ordered by material first, then by voxel dimensions
         # shape [batch_size, max_seq_len, material_num * dimension_size ** 3]
-        past_voxels_one_hot = self.to_one_hot_voxels(
-            self.reorder_observation(past_voxels, time),
-            time,
-        )
+        past_voxels_one_hot = self.to_one_hot_voxels(past_voxels, time)
 
         all_out = torch.cat(
             (
@@ -318,30 +316,30 @@ class Actor(TorchModelV2, nn.Module):
     def metrics(self) -> Dict[str, TensorType]:
         return {"voxel_predict_loss": self._voxel_predict_loss}
 
-    @override(ModelV2)
-    def custom_loss(
-        self, policy_loss: List[TensorType], loss_inputs: Dict[str, TensorType]
-    ) -> List[TensorType]:
-        next_time, _, next_past_voxels = self.unpack_observations(
-            loss_inputs["custom_next_obs"]
-        )
-
-        next_past_voxels = self.reorder_observation(next_past_voxels, next_time)
-        next_past_voxels_one_hot = self.to_one_hot_voxels(
-            next_past_voxels, next_time
-        ).to(policy_loss[0].device)
-        voxel_predict_loss = torch.mean(
-            torch.stack(
-                [
-                    nn.functional.mse_loss(
-                        self._voxel_out[:, : int(t)],
-                        next_past_voxels_one_hot[:, : int(t)],
-                    )
-                    for t in next_time
-                ]
-            )
-        )
-        self._voxel_predict_loss = float(voxel_predict_loss)
+        # @override(ModelV2)
+        # def custom_loss(
+        #     self, policy_loss: List[TensorType], loss_inputs: Dict[str, TensorType]
+        # ) -> List[TensorType]:
+        #     next_time, _, next_past_voxels = self.unpack_observations(
+        #         loss_inputs["custom_next_obs"]
+        #     )
+        #
+        #     next_past_voxels = self.reorder_observation(next_past_voxels, next_time)
+        #     next_past_voxels_one_hot = self.to_one_hot_voxels(
+        #         next_past_voxels, next_time
+        #     ).to(policy_loss[0].device)
+        #     voxel_predict_loss = torch.mean(
+        #         torch.stack(
+        #             [
+        #                 nn.functional.mse_loss(
+        #                     self._voxel_out[:, : int(t)],
+        #                     next_past_voxels_one_hot[:, : int(t)],
+        #                 )
+        #                 for t in next_time
+        #             ]
+        #         )
+        #     )
+        #     self._voxel_predict_loss = float(voxel_predict_loss)
         # print(f"Voxel prediction loss: {voxel_predict_loss}")
         return [_loss + voxel_predict_loss for _loss in policy_loss]
 

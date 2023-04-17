@@ -13,7 +13,7 @@ from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.loggers import TensorBoardLogger
 from sklearn.metrics import f1_score
 from renesis.env.virtual_shape import (
-    VirtualShapeGMMObserveWithVoxelEnvironment,
+    VirtualShapeGMMObserveWithVoxelAndRemainingStepsEnvironment,
     normalize,
 )
 from experiments.gmm_voxcraft_observe_seq_rl_pretrain.config import (
@@ -67,12 +67,13 @@ class PretrainDatasetGenerator:
                 generate = True
 
         if generate:
-            env = VirtualShapeGMMObserveWithVoxelEnvironment(
+            env = VirtualShapeGMMObserveWithVoxelAndRemainingStepsEnvironment(
                 config={
                     "materials": materials,
                     "max_gaussian_num": steps,
                     "dimension_size": dimension_size,
                     "reference_shape": np.zeros([dimension_size] * 3),
+                    "reset_seed": 42,
                     "max_steps": steps,
                     "reward_type": "none",
                 }
@@ -136,12 +137,13 @@ class PretrainDatasetGenerator:
 
     @staticmethod
     def fill_data_worker_initializer(steps, dimension_size, materials):
-        env = VirtualShapeGMMObserveWithVoxelEnvironment(
+        env = VirtualShapeGMMObserveWithVoxelAndRemainingStepsEnvironment(
             config={
                 "materials": materials,
                 "max_gaussian_num": steps,
                 "dimension_size": dimension_size,
                 "reference_shape": np.zeros([dimension_size] * 3),
+                "reset_seed": 42,
                 "max_steps": steps,
                 "reward_type": "none",
             }
@@ -272,7 +274,10 @@ class PretrainDataset(Dataset):
             step_num = self.dataset[:, :, 0]
             for episode in range(self.dataset.shape[0]):
                 for step in range(self.dataset.shape[1] - 1):
-                    if step_num[episode, step] != -1:
+                    if (
+                        step_num[episode, step] != -1
+                        and step_num[episode, step + 1] != -1
+                    ):
                         self.index.append((episode, step))
 
     def __len__(self):
@@ -300,6 +305,7 @@ class PretrainDataset(Dataset):
         predict_voxels[: step + 1] = self.dataset[
             episode, 1 : step + 2, -self.dimension_size**3 :
         ]
+        assert self.dataset[episode, step + 1, 0] != -1
         return past_obs, predict_voxels, step
 
 
@@ -308,7 +314,9 @@ class Pretrainer(pl.LightningModule):
         super().__init__()
         self.save_hyperparameters()
         self.config = config
-        self.env = VirtualShapeGMMObserveWithVoxelEnvironment(config["env_config"])
+        self.env = VirtualShapeGMMObserveWithVoxelAndRemainingStepsEnvironment(
+            config["env_config"]
+        )
         self.model = Actor(
             self.env.observation_space,
             self.env.action_space,
@@ -454,8 +462,5 @@ if __name__ == "__main__":
     )
     trainer.fit(pretrainer)
     pretrainer.load_from_checkpoint(checkpoint_callback.best_model_path)
-    # pretrainer.load_from_checkpoint(
-    #     "/home/iffi/data/renesis/pretrain/checkpoints/epoch=09-f1-f1=0.801.ckpt"
-    # )
     os.makedirs(os.path.dirname(pretrain_config["weight_export_path"]), exist_ok=True)
     t.save(pretrainer.model.state_dict(), pretrain_config["weight_export_path"])

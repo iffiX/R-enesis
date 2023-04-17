@@ -52,6 +52,7 @@ class GMMModel(BaseModel):
         self.gaussians = []  # type: List[np.ndarray]
         self.voxels = None
         self.occupied = None
+        self.invalid_count = 0
         self.is_robot_valid = False
         self.update_voxels()
 
@@ -64,12 +65,14 @@ class GMMModel(BaseModel):
     def observation_space(self):
         return Box(low=0, high=1, shape=(6 + len(self.materials),))
 
-    def reset(self, initial_steps=0):
+    def reset(self):
         self.steps = 0
         self.gaussians = []
         self.update_voxels()
 
     def is_finished(self):
+        # return self.invalid_count > 1
+        # return self.steps != 0 and not self.is_robot_valid
         return False
 
     def is_robot_invalid(self):
@@ -211,9 +214,14 @@ class GMMModel(BaseModel):
         # print("voxels:")
         # print(self.voxels)
         self.occupied = self.voxels[:, :, :] != 0
+        prev_is_valid = self.is_robot_valid
         self.is_robot_valid = is_voxel_continuous(self.occupied) and np.any(
             self.occupied
         )
+        if self.steps != 0 and not prev_is_valid and not self.is_robot_valid:
+            self.invalid_count += 1
+        else:
+            self.invalid_count = 0
 
 
 class GMMObserveWithVoxelModel(GMMModel):
@@ -272,6 +280,99 @@ class GMMObserveWithVoxelModel(GMMModel):
         return np.concatenate(
             [
                 np.array([len(self.gaussians)], dtype=np.float32),
+                super().observe(),
+                self.prev_voxels.reshape(-1),
+            ],
+            axis=0,
+        )
+
+
+class GMMObserveWithVoxelAndRemainingStepsModel(GMMModel):
+    def __init__(
+        self,
+        materials=(0, 1, 2),
+        dimension_size=20,
+        max_gaussian_num=100,
+        cutoff=1e-2,
+        reset_seed=42,
+        reset_remaining_steps_range=None,
+    ):
+        super().__init__(materials, dimension_size, max_gaussian_num, cutoff)
+        self.prev_voxels = np.zeros([self.dimension_size**3], dtype=np.float32)
+        self.reset_remaining_steps_range = reset_remaining_steps_range or (
+            max_gaussian_num,
+            max_gaussian_num,
+        )
+        self.reset_rand = np.random.RandomState(reset_seed)
+        self.remaining_steps = 0
+        self.initial_remaining_steps = 0
+
+    @property
+    def observation_space(self):
+        return Box(
+            low=np.zeros(
+                (2 + 6 + len(self.materials) + self.dimension_size**3,),
+                dtype=np.float32,
+            ),
+            high=np.array(
+                [self.max_gaussian_num]
+                + [self.max_gaussian_num]
+                + [1] * (6 + len(self.materials))
+                + [len(self.materials) - 1] * self.dimension_size**3,
+                dtype=np.float32,
+            ),
+        )
+
+    def reset(self):
+        if self.reset_remaining_steps_range[0] == self.reset_remaining_steps_range[1]:
+            self.initial_remaining_steps = (
+                self.remaining_steps
+            ) = self.reset_remaining_steps_range[0]
+        else:
+            self.initial_remaining_steps = (
+                self.remaining_steps
+            ) = self.reset_rand.randint(
+                max(self.reset_remaining_steps_range[0], 1),
+                self.reset_remaining_steps_range[1] + 1,
+            )
+        print(self.initial_remaining_steps)
+        super().reset()
+
+    def step(self, action: np.ndarray):
+        self.prev_voxels = (
+            self.voxels
+            if self.voxels is not None
+            else np.zeros([self.dimension_size**3], dtype=np.float32)
+        )
+        super().step(action)
+        self.remaining_steps -= 1
+
+    def is_finished(self):
+        return self.remaining_steps == 0
+
+    def observe(self):
+        # V: voxels, a: action
+        # Let an n step episode be:
+        # V_0 --a_0--> V_1 --a_1--> V_2 ... V_n-1 --a_n-1-->V_n
+        # Then:
+        # obs_0 = 0
+        # obs_1 = (1, a_0, V_0)
+        # obs_2 = (2, a_1, V_1)
+        # ...
+        # This is the observation used to generate the last action a_n-1
+        # obs_n-1 = (n-1, a_n-2, V_n-2)
+        # This is the last observation after applying the last action a_n-1
+        # obs_n = (n, a_n-1, V_n-1)
+        return np.concatenate(
+            [
+                np.array(
+                    [
+                        len(self.gaussians),
+                        # self.remaining_steps / (self.initial_remaining_steps + 1e-3),
+                        self.remaining_steps,
+                    ],
+                    dtype=np.float32,
+                ),
                 super().observe(),
                 self.prev_voxels.reshape(-1),
             ],

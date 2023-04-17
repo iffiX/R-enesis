@@ -1,5 +1,5 @@
 import ray
-import torch as t
+import numpy as np
 import experiments.gmm_voxcraft_observe_seq_rl_pretrain.model
 from ray import tune
 from ray.tune.logger import TBXLoggerCallback
@@ -8,7 +8,6 @@ from experiments.gmm_voxcraft_observe_seq_rl_pretrain.utils import DataLoggerCal
 from experiments.gmm_voxcraft_observe_seq_rl_pretrain.config import (
     config,
     iters,
-    steps,
 )
 
 
@@ -29,13 +28,13 @@ if __name__ == "__main__":
         log_to_file=True,
         stop={
             "timesteps_total": config["train_batch_size"] * iters,
-            "episodes_total": config["train_batch_size"] * iters / steps,
+            "episodes_total": np.infty,
         },
         # Order is important!
         callbacks=[
             DataLoggerCallback(config["env_config"]["base_config_path"]),
             TBXLoggerCallback(),
         ],
-        # restore="",
+        restore="",
     )
     ray.shutdown()

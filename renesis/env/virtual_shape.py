@@ -3,7 +3,12 @@ import numpy as np
 from sklearn.metrics import precision_score, recall_score, f1_score
 from renesis.utils.plotter import Plotter
 from renesis.env_model.cppn import CPPNVirtualShapeBinaryTreeModel
-from renesis.env_model.gmm import GMMModel, GMMObserveWithVoxelModel, normalize
+from renesis.env_model.gmm import (
+    GMMModel,
+    GMMObserveWithVoxelModel,
+    GMMObserveWithVoxelAndRemainingStepsModel,
+    normalize,
+)
 
 
 class VirtualShapeBaseEnvironment(gym.Env):
@@ -177,6 +182,22 @@ class VirtualShapeGMMObserveWithVoxelEnvironment(VirtualShapeGMMEnvironment):
             materials=config["materials"],
             dimension_size=config["dimension_size"],
             max_gaussian_num=config["max_gaussian_num"],
+        )
+        super(VirtualShapeGMMEnvironment, self).__init__(
+            config, env_model, env_model.materials
+        )
+
+
+class VirtualShapeGMMObserveWithVoxelAndRemainingStepsEnvironment(
+    VirtualShapeGMMEnvironment
+):
+    def __init__(self, config):
+        env_model = GMMObserveWithVoxelAndRemainingStepsModel(
+            materials=config["materials"],
+            dimension_size=config["dimension_size"],
+            max_gaussian_num=config["max_gaussian_num"],
+            reset_seed=config.get(config["reset_seed"], 42),
+            reset_remaining_steps_range=config.get("reset_remaining_steps_range", None),
         )
         super(VirtualShapeGMMEnvironment, self).__init__(
             config, env_model, env_model.materials
