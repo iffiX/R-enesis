@@ -8,7 +8,7 @@ materials = (0, 1, 2, 3)
 iters = 200
 steps = 20
 workers = 1
-envs = 512
+envs = 128
 rollout = 1
 
 pretrain_config = {
@@ -31,7 +31,7 @@ pretrain_config = {
     "lr": 1e-4,
     "epochs": 10,
     "seed": 132434,
-    "episode_num_for_train": 20000,
+    "episode_num_for_train": 10000,
     "episode_num_for_validate": 100,
     "dataloader_args": {
         # "num_workers": 4,
@@ -64,7 +64,7 @@ config = {
         "materials": materials,
         "max_gaussian_num": steps,
         "reset_seed": 42,
-        "reset_remaining_steps_range": (1, steps),
+        "reset_remaining_steps_range": (steps, steps),
         "max_steps": steps,
         "reward_type": "distance_traveled",
         "base_config_path": str(
@@ -100,14 +100,14 @@ config = {
         "render_env": False,
         "explore": True,
         "env_config": {
-            "debug": False,
+            "debug": True,
             "dimension_size": dimension_size,
             "materials": materials,
             "max_gaussian_num": steps,
-            "max_steps": steps,
             "reset_seed": 42,
             # For evaluation always allows max steps to be executed
             "reset_remaining_steps_range": (steps, steps),
+            "max_steps": steps,
             "reward_type": "distance_traveled",
             "base_config_path": str(
                 os.path.join(

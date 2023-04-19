@@ -9,7 +9,16 @@ from ray.rllib.algorithms.callbacks import DefaultCallbacks
 from renesis.env.voxcraft import (
     VoxcraftSingleRewardGMMObserveWithVoxelAndRemainingStepsEnvironment,
 )
+from renesis.env_model.gmm import GMMObserveWithVoxelAndRemainingStepsModel
+from renesis.utils.metrics import (
+    get_volume,
+    get_surface_area,
+    get_surface_voxels,
+    get_section_num,
+    get_reflection_symmetry,
+)
 from renesis.utils.media import create_video_subproc
+from renesis.utils.debug import enable_debugger
 from renesis.sim import Voxcraft, VXHistoryRenderer
 from launch.snapshot import get_snapshot
 
@@ -81,9 +90,12 @@ class CustomCallbacks(DefaultCallbacks):
         )  # type: VoxcraftSingleRewardGMMObserveWithVoxelAndRemainingStepsEnvironment
         episode.media["episode_data"]["reward"] = env.end_rewards[env_index]
         episode.media["episode_data"]["robot"] = env.end_robots[env_index]
-        episode.custom_metrics["real_reward"] = env.end_rewards[env_index]
         # May be also record state data (gaussians) ?
         # episode.media["episode_data"]["state_data"] = env.end_state_data[env_index]
+
+        episode.custom_metrics["real_reward"] = env.end_rewards[env_index]
+        metrics = self.get_robot_metric(env.env_models[env_index])
+        episode.custom_metrics.update(metrics)
 
     def on_train_result(
         self,
@@ -122,6 +134,26 @@ class CustomCallbacks(DefaultCallbacks):
                     }
                 }
 
+    def get_robot_metric(self, env_model: GMMObserveWithVoxelAndRemainingStepsModel):
+        voxels = env_model.get_voxels()
+        metrics = {}
+        metrics["volume"] = get_volume(voxels)
+        metrics["surface_area"] = get_surface_area(voxels)
+        metrics["surface_voxels"] = get_surface_voxels(voxels)
+        metrics["surface_area_to_total_volume_ratio"] = (
+            metrics["surface_area"] / metrics["volume"]
+        )
+        metrics["surface_voxels_to_total_volume_ratio"] = (
+            metrics["surface_voxels"] / metrics["volume"]
+        )
+        metrics["section_num"] = get_section_num(voxels)
+        metrics["reflection_symmetry"] = get_reflection_symmetry(voxels)
+        total_steps = env_model.initial_remaining_steps
+        gaussians = env_model.get_state_data()
+        zero_steps = np.sum(np.argmax(gaussians[:, 6:], axis=-1) == 0)
+        metrics["zero_step_ratio"] = zero_steps / total_steps
+        return metrics
+
 
 class DataLoggerCallback(LoggerCallback):
     def __init__(self, base_config_path):
@@ -159,8 +191,10 @@ class DataLoggerCallback(LoggerCallback):
                             np.max(data["rewards"]),
                             np.mean(data["rewards"]),
                             np.min(data["rewards"]),
+                            result["evaluation"].get("custom_metrics", None),
                         )
                     ]
+                    print(metrics)
                     pickle.dump(metrics, file)
 
                 robot = data["best_robot"]

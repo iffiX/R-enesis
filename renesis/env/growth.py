@@ -1,6 +1,6 @@
 import gym
 import numpy as np
-from renesis.utils.fitness import (
+from renesis.utils.metrics import (
     max_z,
     table,
     max_volume,
@@ -16,7 +16,6 @@ from renesis.env_model.growth import GrowthModel
 
 
 class GrowthEnvironment(gym.Env):
-
     metadata = {"render.modes": ["rgb_array"]}
 
     def __init__(self, config):

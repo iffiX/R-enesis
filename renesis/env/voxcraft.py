@@ -7,7 +7,7 @@ from ray.rllib import VectorEnv
 from ray.rllib.utils import override
 from renesis.sim import Voxcraft
 from renesis.utils.voxcraft import vxd_creator, get_voxel_positions
-from renesis.utils.fitness import max_z, table, distance_traveled, has_fallen
+from renesis.utils.metrics import max_z, table, distance_traveled, has_fallen
 from renesis.utils.debug import enable_debugger
 from renesis.env_model.base import BaseModel
 from renesis.env_model.cppn import (
@@ -234,7 +234,9 @@ class VoxcraftBaseEnvironment(VectorEnv):
 class VoxcraftGrowthEnvironment(VoxcraftBaseEnvironment):
     def __init__(self, config):
         if config.get("debug", False):
-            enable_debugger(config["debug_ip"], config["debug_port"])
+            enable_debugger(
+                config.get("debug_ip", "localhost"), config.get("debug_port", 8223)
+            )
         env_models = [
             GrowthModel(
                 materials=config["materials"],
@@ -254,7 +256,9 @@ class VoxcraftCPPNBinaryTreeEnvironment(VoxcraftBaseEnvironment):
     def __init__(self, config):
         self.initial_max_random_steps = config.get("initial_max_random_steps", 0)
         if config.get("debug", False):
-            enable_debugger(config["debug_ip"], config["debug_port"])
+            enable_debugger(
+                config.get("debug_ip", "localhost"), config.get("debug_port", 8223)
+            )
         env_models = [
             CPPNBinaryTreeModel(
                 dimension_size=config["dimension_size"],
@@ -275,7 +279,9 @@ class VoxcraftCPPNBinaryTreeWithPhaseOffsetEnvironment(VoxcraftBaseEnvironment):
     def __init__(self, config):
         self.initial_max_random_steps = config.get("initial_max_random_steps", 0)
         if config.get("debug", False):
-            enable_debugger(config["debug_ip"], config["debug_port"])
+            enable_debugger(
+                config.get("debug_ip", "localhost"), config.get("debug_port", 8223)
+            )
         env_models = [
             CPPNBinaryTreeWithPhaseOffsetModel(
                 dimension_size=config["dimension_size"],
@@ -295,7 +301,9 @@ class VoxcraftCPPNBinaryTreeWithPhaseOffsetEnvironment(VoxcraftBaseEnvironment):
 class VoxcraftGMMEnvironment(VoxcraftBaseEnvironment):
     def __init__(self, config):
         if config.get("debug", False):
-            enable_debugger(config["debug_ip"], config["debug_port"])
+            enable_debugger(
+                config.get("debug_ip", "localhost"), config.get("debug_port", 8223)
+            )
         env_models = [
             GMMModel(
                 materials=config["materials"],
@@ -313,7 +321,9 @@ class VoxcraftGMMEnvironment(VoxcraftBaseEnvironment):
 class VoxcraftGMMObserveWithVoxelEnvironment(VoxcraftGMMEnvironment):
     def __init__(self, config):
         if config.get("debug", False):
-            enable_debugger(config["debug_ip"], config["debug_port"])
+            enable_debugger(
+                config.get("debug_ip", "localhost"), config.get("debug_port", 8223)
+            )
         env_models = [
             GMMObserveWithVoxelModel(
                 materials=config["materials"],
@@ -535,7 +545,9 @@ class VoxcraftSingleRewardGMMObserveWithVoxelAndRemainingStepsEnvironment(
 ):
     def __init__(self, config):
         if config.get("debug", False):
-            enable_debugger(config["debug_ip"], config["debug_port"])
+            enable_debugger(
+                config.get("debug_ip", "localhost"), config.get("debug_port", 8223)
+            )
         env_models = [
             GMMObserveWithVoxelAndRemainingStepsModel(
                 materials=config["materials"],

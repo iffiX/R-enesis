@@ -335,7 +335,6 @@ class GMMObserveWithVoxelAndRemainingStepsModel(GMMModel):
                 max(self.reset_remaining_steps_range[0], 1),
                 self.reset_remaining_steps_range[1] + 1,
             )
-        print(self.initial_remaining_steps)
         super().reset()
 
     def step(self, action: np.ndarray):

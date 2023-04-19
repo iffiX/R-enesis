@@ -83,9 +83,9 @@
         <Material ID="3">
             <Name>Motor2</Name>
             <Display>
-                <Red>0</Red>
+                <Red>1</Red>
                 <Green>0</Green>
-                <Blue>1</Blue>
+                <Blue>0</Blue>
                 <Alpha>0.75</Alpha>
             </Display>
             <Mechanical>
