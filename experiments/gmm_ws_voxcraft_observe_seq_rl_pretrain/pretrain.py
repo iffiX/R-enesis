@@ -11,18 +11,21 @@ from torch.optim import Adam
 from torch.utils.data import Dataset, DataLoader, RandomSampler
 from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning.loggers import TensorBoardLogger
+from pytorch_lightning import seed_everything
 from sklearn.metrics import f1_score
+from ray.rllib.models.torch.torch_action_dist import TorchDiagGaussian
 from renesis.env.virtual_shape import (
-    VirtualShapeGMMObserveWithVoxelAndRemainingStepsEnvironment,
+    VirtualShapeGMMWSObserveWithVoxelAndRemainingStepsEnvironment,
     normalize,
 )
-from experiments.gmm_voxcraft_observe_seq_rl_pretrain.config import (
+from experiments.gmm_ws_voxcraft_observe_seq_rl_pretrain.config import (
     pretrain_config,
     steps,
     dimension_size,
     materials,
+    sigma,
 )
-from experiments.gmm_voxcraft_observe_seq_rl_pretrain.model import Actor
+from experiments.gmm_ws_voxcraft_observe_seq_rl_pretrain.model import Actor
 
 
 class PretrainDatasetGeneratorParallelContext:
@@ -67,19 +70,12 @@ class PretrainDatasetGenerator:
                 generate = True
 
         if generate:
-            env = VirtualShapeGMMObserveWithVoxelAndRemainingStepsEnvironment(
-                config={
-                    "materials": materials,
-                    "max_gaussian_num": steps,
-                    "dimension_size": dimension_size,
-                    "reference_shape": np.zeros([dimension_size] * 3),
-                    "reset_seed": 42,
-                    "max_steps": steps,
-                    "reward_type": "none",
-                }
+            env = VirtualShapeGMMWSObserveWithVoxelAndRemainingStepsEnvironment(
+                config=pretrain_config["env_config"]
             )
 
             observation_space = env.observation_space
+            action_space = env.action_space
             expected_size = (
                 (episode_num_for_train + episode_num_for_validate)
                 * steps
@@ -92,6 +88,8 @@ class PretrainDatasetGenerator:
                 file.attrs["steps"] = steps
                 file.attrs["dimension_size"] = dimension_size
                 file.attrs["materials"] = str(materials)
+                file.attrs["action_space_size"] = action_space.shape[0]
+                file.attrs["observation_space_size"] = observation_space.shape[0]
                 # Last dimension stores the step number, the action and the
                 # voxels before that action.
                 # The step number starts at 0, For episodes shorter than steps,
@@ -106,12 +104,12 @@ class PretrainDatasetGenerator:
                         shape=(
                             split_episode_num,
                             1 + steps,
-                            observation_space.shape[0],
+                            action_space.shape[0] + observation_space.shape[0],
                         ),
                         chunks=(
                             100,
                             1 + steps,
-                            observation_space.shape[0],
+                            action_space.shape[0] + observation_space.shape[0],
                         ),
                         dtype=np.float32,
                     )
@@ -137,16 +135,8 @@ class PretrainDatasetGenerator:
 
     @staticmethod
     def fill_data_worker_initializer(steps, dimension_size, materials):
-        env = VirtualShapeGMMObserveWithVoxelAndRemainingStepsEnvironment(
-            config={
-                "materials": materials,
-                "max_gaussian_num": steps,
-                "dimension_size": dimension_size,
-                "reference_shape": np.zeros([dimension_size] * 3),
-                "reset_seed": 42,
-                "max_steps": steps,
-                "reward_type": "none",
-            }
+        env = VirtualShapeGMMWSObserveWithVoxelAndRemainingStepsEnvironment(
+            config=pretrain_config["env_config"]
         )
         PretrainDatasetGeneratorParallelContext.worker_data = (
             env,
@@ -158,18 +148,19 @@ class PretrainDatasetGenerator:
     @staticmethod
     def fill_data_worker(seed):
         env, steps, *_ = PretrainDatasetGeneratorParallelContext.worker_data
-
-        episode = np.zeros([1 + steps, env.observation_space.shape[0]])
-        # Set time step of non-initialized step records to -1
+        act_s, obs_s = env.action_space.shape[0], env.observation_space.shape[0]
+        episode = np.zeros([1 + steps, act_s + obs_s])
+        # Set first dimension non-initialized step records to -1
         episode[:, 0] = -1
         rand = np.random.RandomState(seed)
         obs = env.reset()
-        episode[0] = obs
+        episode[0, :] = 0
+        episode[0, act_s:] = obs
         for step in range(steps):
             # TODO: find an appropriate way to generate this
             action = rand.rand(*env.action_space.shape) * 4 - 2
             obs, _, done, __ = env.step(action)
-            episode[step + 1] = obs
+            episode[step + 1] = np.concatenate((action, obs))
             if done:
                 break
         return episode
@@ -268,7 +259,8 @@ class PretrainDataset(Dataset):
             print("Loaded")
             self.steps = file.attrs["steps"]
             self.dimension_size = file.attrs["dimension_size"]
-            self.observation_space_size = self.dataset.shape[-1]
+            self.action_space_size = file.attrs["action_space_size"]
+            self.observation_space_size = file.attrs["observation_space_size"]
 
             self.index = []
             step_num = self.dataset[:, :, 0]
@@ -288,25 +280,36 @@ class PretrainDataset(Dataset):
         past_obs = t.zeros(
             [self.steps, self.observation_space_size], dtype=t.float32, device="cuda:0"
         )
-        predict_voxels = t.zeros(
-            [self.steps, self.dimension_size**3], dtype=t.float32, device="cuda:0"
+        predict_actions = t.zeros(
+            [self.steps, self.action_space_size], dtype=t.float32, device="cuda:0"
+        )
+        predict_voxels = t.full(
+            [self.steps, self.dimension_size**3],
+            fill_value=-100,
+            dtype=t.long,
+            device="cuda:0",
         )
         # For past_obs, pad it to the left to make it consistent with the
         # ray trajectory view output
         # i.e. Suppose steps = 10, t=3, (t is step, t starts at 0) the observation is like:
         # [0, 0, 0, 0, 0, 0, obs_0, obs_1, obs_2, obs_3]
         # and obs_0 = 0
-        past_obs[-(step + 1) :] = self.dataset[episode, : step + 1]
+        past_obs[-(step + 1) :] = self.dataset[
+            episode, : step + 1, self.action_space_size :
+        ]
 
         # Since input is reordered in the model internally as:
         # [obs_0, obs_1, obs_2, obs_3, 0, 0, 0, 0, 0, 0]
         # Prediction target is
-        # [obs_1, obs_2, obs_3, obs_4, 0, 0, 0, 0, 0, 0]
+        # [obs_1, obs_2, obs_3, obs_4, -100, -100, -100, -100, -100, -100]
+        predict_actions[:step] = self.dataset[
+            episode, 1 : step + 1, : self.action_space_size
+        ]
         predict_voxels[: step + 1] = self.dataset[
             episode, 1 : step + 2, -self.dimension_size**3 :
         ]
         assert self.dataset[episode, step + 1, 0] != -1
-        return past_obs, predict_voxels, step
+        return past_obs, predict_actions, predict_voxels, step
 
 
 class Pretrainer(pl.LightningModule):
@@ -314,7 +317,7 @@ class Pretrainer(pl.LightningModule):
         super().__init__()
         self.save_hyperparameters()
         self.config = config
-        self.env = VirtualShapeGMMObserveWithVoxelAndRemainingStepsEnvironment(
+        self.env = VirtualShapeGMMWSObserveWithVoxelAndRemainingStepsEnvironment(
             config["env_config"]
         )
         self.model = Actor(
@@ -355,8 +358,8 @@ class Pretrainer(pl.LightningModule):
         )
 
     def training_step(self, batch, batch_idx):
-        past_obs, predict_voxels, time = batch
-        predicted_voxels_one_hot_mean, *_ = self.model(
+        past_obs, predict_actions, predict_voxels, time = batch
+        (predicted_actions, predicted_voxels_logits), *_ = self.model(
             {
                 "obs": past_obs[:, -1].to(
                     self.device
@@ -367,20 +370,83 @@ class Pretrainer(pl.LightningModule):
             None,
             None,
         )
-        # loss = F.binary_cross_entropy(
-        #     t.sigmoid(predicted_voxels_one_hot_mean),
+        # voxel_loss = F.cross_entropy(
+        #     predicted_voxels_logits.view(
+        #         (
+        #             predict_voxels.shape[0],
+        #             predict_voxels.shape[1],
+        #             -1,
+        #             predict_voxels.shape[2],
+        #         )
+        #     ).transpose(1, 2),
+        #     predict_voxels,
+        #     ignore_index=-100,
+        # )
+        # voxel_loss = F.binary_cross_entropy(
+        #     t.sigmoid(predicted_voxels_logits),
         #     self.model.to_one_hot_voxels(predict_voxels, time=time).to(self.device),
         # )
-        loss = F.mse_loss(
-            predicted_voxels_one_hot_mean,
+        action_dim = predicted_actions.shape[-1]
+        # predicted_action_mean_loss = t.mean(
+        #     t.mean(predicted_actions[:, :, : action_dim // 2], dim=(0, 1)) ** 2
+        # ) + t.mean((t.abs(predicted_actions[:, :, : action_dim // 2]) - 2) ** 2)
+        # predicted_action_log_std_loss = t.mean(
+        #     (t.mean(predicted_actions[:, :, action_dim // 2 :], dim=(0, 1))) ** 2
+        # )
+        # print(t.mean(t.abs(predicted_actions[:, :, : action_dim // 2])))
+
+        predicted_action_mean_loss = 0
+        metrics = [[], []]
+        for idx, ti in enumerate(time):
+            predicted_action_mean_loss += t.mean(
+                t.mean(predicted_actions[idx, : ti + 1, : action_dim // 2], dim=0) ** 2
+            ) + t.mean(
+                (
+                    t.mean(
+                        t.abs(predicted_actions[idx, : ti + 1, : action_dim // 2]),
+                        dim=0,
+                    )
+                    - 1
+                )
+                ** 2
+            )
+            metrics[0].append(
+                t.mean(
+                    t.mean(predicted_actions[idx, : ti + 1, : action_dim // 2], dim=0)
+                    ** 2
+                )
+            )
+            metrics[1].append(
+                t.mean(
+                    t.mean(
+                        t.abs(predicted_actions[idx, : ti + 1, : action_dim // 2]),
+                        dim=0,
+                    )
+                    ** 2
+                )
+            )
+        print(predicted_actions[0, :10, :])
+        print(t.mean(t.tensor(metrics[0])))
+        print(t.mean(t.tensor(metrics[1])))
+        predicted_action_log_std_loss = 0
+
+        # make mean of mean=0 and mean of log_std=0
+        action_regularize_loss = (
+            predicted_action_mean_loss + predicted_action_log_std_loss
+        )
+
+        voxel_loss = F.mse_loss(
+            t.sigmoid(predicted_voxels_logits),
             self.model.to_one_hot_voxels(predict_voxels, time=time).to(self.device),
         )
-        return loss
+
+        return voxel_loss + action_regularize_loss
 
     def validation_step(self, batch, batch_idx):
-        past_obs, predict_voxels, time = batch
+        past_obs, predict_actions, predict_voxels, time = batch
         predict_voxels = predict_voxels[range(len(time)), time]
-        predicted_voxels_one_hot_mean, *_ = self.model(
+        # print(self.model.action_out[-1]._model[0].weight)
+        (predicted_actions, predicted_voxels_logits), *_ = self.model(
             {
                 "obs": past_obs[:, -1].to(
                     self.device
@@ -393,8 +459,8 @@ class Pretrainer(pl.LightningModule):
         )
         # Only compare the last predicted voxels
         last_predicted_voxels = t.argmax(
-            predicted_voxels_one_hot_mean[range(len(time)), time].reshape(
-                predicted_voxels_one_hot_mean.shape[0], len(self.model.materials), -1
+            predicted_voxels_logits[range(len(time)), time].reshape(
+                predicted_voxels_logits.shape[0], len(self.model.materials), -1
             ),
             dim=1,
         )
@@ -427,6 +493,7 @@ class Pretrainer(pl.LightningModule):
 
 
 if __name__ == "__main__":
+    seed_everything(pretrain_config["seed"])
     gen = PretrainDatasetGenerator(
         pretrain_config["dataset_path"],
         steps=steps,
@@ -457,7 +524,7 @@ if __name__ == "__main__":
         callbacks=[checkpoint_callback],
         logger=[t_logger],
         max_epochs=pretrain_config["epochs"],
-        deterministic=True,
+        # deterministic=True,
         precision=32,
     )
     trainer.fit(pretrainer)

@@ -1,8 +1,10 @@
 import torch
+import torch.nn as nn
 from ray.rllib.models import ModelCatalog
 from ray.rllib.models.torch.attention_net import *
 from ray.rllib.models.torch.modules.relative_multi_head_attention import *
 from ray.rllib.policy.sample_batch import SampleBatch
+from ray.rllib.algorithms.ppo import PPO
 from renesis.utils.debug import print_model_size, enable_debugger
 
 
@@ -13,9 +15,9 @@ class RelativeMultiHeadAttentionUnevenSequence(RelativeMultiHeadAttention):
     def forward(
         self, inputs: TensorType, lengths: TensorType, memory: TensorType = None
     ) -> TensorType:
-        # inputs shape: [Batch, Time, Dim]
+        # inputs shape: [Batch, T, Dim]
         # lengths shape: [Batch]
-        # memory shape: [Batch, Time, Dim]
+        # memory shape: [Batch, Tau, Dim]
         T = list(inputs.size())[1]  # length of segment (time)
         H = self._num_heads  # number of attention heads
         d = self._head_dim  # attention head dimension
@@ -46,7 +48,7 @@ class RelativeMultiHeadAttentionUnevenSequence(RelativeMultiHeadAttention):
         R = torch.reshape(R, [Tau + T, H, d])
 
         # b=batch
-        # i and j=time indices (i=max-timesteps (inputs); j=Tau memory space)
+        # i and j=time indices (i = T; j = T + Tau)
         # h=head
         # d=head-dim (over which we will reduce-sum)
         score = torch.einsum("bihd,bjhd->bijh", queries + self._uvar, keys)
@@ -65,14 +67,18 @@ class RelativeMultiHeadAttentionUnevenSequence(RelativeMultiHeadAttention):
         # [1, 1, 1, 0, 0]
         # [0, 0, 0, 0, 0]
         # [0, 0, 0, 0, 0]
+
         masks = []
         for l in lengths:
+            # sub mask shape [T, Tau + T]
             sub_mask = sequence_mask(
                 torch.tensor([Tau + 1 + j if j <= int(l) else 0 for j in range(T)]),
-                maxlen=T,
+                maxlen=Tau + T,
                 dtype=score.dtype,
             ).to(score.device)
             masks.append(sub_mask)
+        # score.shape = [b, T, Tau + T, h]
+        # mask_shape = [b, T, Tau + T, 1]
         mask_shape = list(score.shape)
         mask_shape[-1] = 1
         mask = torch.stack(masks, dim=0).view(mask_shape)
@@ -84,11 +90,10 @@ class RelativeMultiHeadAttentionUnevenSequence(RelativeMultiHeadAttention):
         shape = list(out.shape)[:2] + [H * d]
         out = torch.reshape(out, shape)
 
-        # output shape: [Batch, Time, Dim]
+        # output shape: [Batch, Tau + T, Head * Dim]
         # Set positions larger than input length to 0.
         for l in lengths:
             out[:, Tau + int(l) + 1 :] = 0
-
         return self._linear_layer(out)
 
 
@@ -103,10 +108,9 @@ class Actor(TorchModelV2, nn.Module):
         *,
         num_transformer_units: int = 1,
         gaussian_dim: int = 16,
-        voxel_dim: int = 48,
         attention_dim: int = 64,
         num_heads: int = 2,
-        memory: int = 50,
+        memory: int = 0,
         head_dim: int = 32,
         position_wise_mlp_dim: int = 32,
         init_gru_gate_bias: float = 2.0,
@@ -114,9 +118,9 @@ class Actor(TorchModelV2, nn.Module):
         materials=None,
         for_online_policy: bool = True,
     ):
+        assert gaussian_dim < attention_dim
         assert dimension_size is not None
         assert materials is not None
-        assert gaussian_dim + voxel_dim == attention_dim
         super().__init__(
             observation_space, action_space, num_outputs, model_config, name
         )
@@ -125,7 +129,7 @@ class Actor(TorchModelV2, nn.Module):
         self.num_transformer_units = num_transformer_units
         self.input_gaussian_dim = observation_space.shape[0] - 1 - dimension_size**3
         self.gaussian_dim = gaussian_dim
-        self.voxel_dim = voxel_dim
+        self.voxel_dim = attention_dim - gaussian_dim
         self.attention_dim = attention_dim
         self.num_heads = num_heads
         self.memory = memory
@@ -136,11 +140,12 @@ class Actor(TorchModelV2, nn.Module):
         self.for_online_policy = for_online_policy
 
         self.input_gaussian_layer = SlimFC(
-            in_size=self.input_gaussian_dim, out_size=gaussian_dim
+            in_size=self.input_gaussian_dim,
+            out_size=self.gaussian_dim,
         )
         self.input_voxel_layer = SlimFC(
             in_size=dimension_size**3 * len(self.materials),
-            out_size=voxel_dim,
+            out_size=self.voxel_dim,
         )
         self.output_voxel_layer = SlimFC(
             in_size=self.attention_dim,
@@ -156,7 +161,9 @@ class Actor(TorchModelV2, nn.Module):
                 activation_fn="relu",
             ),
             SlimFC(
-                in_size=self.attention_dim, out_size=num_outputs, activation_fn=None
+                in_size=self.attention_dim,
+                out_size=num_outputs // 2,
+                activation_fn=None,
             ),
         )
         self.value_out = nn.Sequential(
@@ -168,6 +175,7 @@ class Actor(TorchModelV2, nn.Module):
             SlimFC(in_size=self.attention_dim, out_size=1, activation_fn=None),
         )
         # Last value output.
+        self._action_out = None
         self._value_out = None
 
         attention_layers = []
@@ -214,22 +222,29 @@ class Actor(TorchModelV2, nn.Module):
         self.attention_layers = nn.Sequential(*attention_layers)
 
         # Setup trajectory views
-        # t is different for evaulation and training! ???
-        # for evaluation it starts at -1, for training it starts at 0 ???
-        # self.view_requirements["custom_t"] = ViewRequirement(data_col=SampleBatch.T)
+        # t is different for evaluation and training ???
+        # for action computation it starts at -1, for training it starts at 0 ???
+        # And these 2 view requirements will not work normally
+        # self.view_requirements["custom_t"] = ViewRequirement(
+        #     data_col=SampleBatch.T,
+        # )
+        # self.view_requirements["custom_train_t"] = ViewRequirement(
+        #     data_col=SampleBatch.T,
+        #     used_for_training=True,
+        #     used_for_compute_actions=False,
+        # )
         # Use recorded t from environment instead
-
         self.view_requirements["custom_obs"] = ViewRequirement(
             data_col=SampleBatch.OBS,
             space=observation_space,
             shift=f"-{self.max_seq_len-1}:0",
         )
-        self.view_requirements["custom_next_obs"] = ViewRequirement(
-            data_col=SampleBatch.OBS,
-            space=observation_space,
-            shift=f"-{self.max_seq_len-2}:1",
-            used_for_compute_actions=False,
-        )
+        # self.view_requirements["custom_next_obs"] = ViewRequirement(
+        #     data_col=SampleBatch.OBS,
+        #     space=observation_space,
+        #     shift=f"-{self.max_seq_len-2}:1",
+        #     used_for_compute_actions=False,
+        # )
         # Setup memory views, (`memory-inference` x past memory outs).
         # if self.memory > 0:
         #     for i in range(self.num_transformer_units):
@@ -256,14 +271,13 @@ class Actor(TorchModelV2, nn.Module):
         time, past_gaussians, past_voxels = self.unpack_observations(
             input_dict["custom_obs"]
         )
-
+        assert torch.all(time < self.max_seq_len)
         # First observation corresponds to special start token
         past_gaussians = self.reorder_observation(past_gaussians, time)
         past_voxels = self.reorder_observation(past_voxels, time)
         # Note: the last dimension is ordered by material first, then by voxel dimensions
         # shape [batch_size, max_seq_len, material_num * dimension_size ** 3]
         past_voxels_one_hot = self.to_one_hot_voxels(past_voxels, time)
-
         all_out = torch.cat(
             (
                 self.input_gaussian_layer(past_gaussians),
@@ -271,6 +285,7 @@ class Actor(TorchModelV2, nn.Module):
             ),
             dim=2,
         )
+
         memory_outs = []
         for i in range(len(self.attention_layers)):
             # MHA layers which need memory passed in.
@@ -292,19 +307,35 @@ class Actor(TorchModelV2, nn.Module):
         memory_outs = memory_outs[:-1]
 
         # all_out shape [batch_size, max_gaussian_num, attention_dim]
-        voxel_mean = self.output_voxel_layer(all_out)
-        self._voxel_out = voxel_mean
-
         # Use last for computing value output.
         last = time.to(dtype=torch.long).flatten()
         last_output = all_out[range(len(last)), last, :]
         self._value_out = self.value_out(last_output)
+        self._action_out = self.action_out(last_output)
+        self._action_out = torch.cat(
+            (
+                self._action_out,
+                torch.full_like(
+                    self._action_out, float(np.log(1 / (2 * self.dimension_size)))
+                ),
+            ),
+            dim=-1,
+        )
 
         if input_dict.get("return_voxel", False):
-            out = voxel_mean
+            all_action_out = self.action_out(all_out)
+            all_action_out = torch.cat(
+                (all_action_out, torch.zeros_like(all_action_out)), dim=-1
+            )
+            out = (all_action_out, self.output_voxel_layer(all_out))
         else:
-            out = self.action_out(last_output)
-        return out, [torch.reshape(m, [-1, self.attention_dim]) for m in memory_outs]
+            out = self._action_out
+        return (
+            out,
+            [torch.reshape(m, [-1, self.attention_dim]) for m in memory_outs]
+            if self.memory > 0
+            else [],
+        )
 
     @override(ModelV2)
     def value_function(self) -> TensorType:
@@ -313,35 +344,19 @@ class Actor(TorchModelV2, nn.Module):
         ), "Must call forward first AND must have value branch!"
         return torch.reshape(self._value_out, [-1])
 
-    def metrics(self) -> Dict[str, TensorType]:
-        return {"voxel_predict_loss": self._voxel_predict_loss}
-
-        # @override(ModelV2)
-        # def custom_loss(
-        #     self, policy_loss: List[TensorType], loss_inputs: Dict[str, TensorType]
-        # ) -> List[TensorType]:
-        #     next_time, _, next_past_voxels = self.unpack_observations(
-        #         loss_inputs["custom_next_obs"]
-        #     )
-        #
-        #     next_past_voxels = self.reorder_observation(next_past_voxels, next_time)
-        #     next_past_voxels_one_hot = self.to_one_hot_voxels(
-        #         next_past_voxels, next_time
-        #     ).to(policy_loss[0].device)
-        #     voxel_predict_loss = torch.mean(
-        #         torch.stack(
-        #             [
-        #                 nn.functional.mse_loss(
-        #                     self._voxel_out[:, : int(t)],
-        #                     next_past_voxels_one_hot[:, : int(t)],
-        #                 )
-        #                 for t in next_time
-        #             ]
-        #         )
-        #     )
-        #     self._voxel_predict_loss = float(voxel_predict_loss)
-        # print(f"Voxel prediction loss: {voxel_predict_loss}")
-        return [_loss + voxel_predict_loss for _loss in policy_loss]
+    # @override(ModelV2)
+    # def custom_loss(
+    #     self, policy_loss: List[TensorType], loss_inputs: Dict[str, TensorType]
+    # ) -> List[TensorType]:
+    #     # Restrict std to be less than 0.1
+    #     log_std = torch.chunk(self._action_out, 2, dim=-1)[1]
+    #     threshold = float(np.log(0.1))
+    #     raw_exceeds = log_std - threshold
+    #     exceeds = torch.where(
+    #         raw_exceeds > 0, raw_exceeds, torch.zeros_like(raw_exceeds)
+    #     )
+    #     exceeds_loss = torch.mean(exceeds**2)
+    #     return [loss + exceeds_loss for loss in policy_loss]
 
     def unpack_observations(self, observations):
         # shape of observations
@@ -362,6 +377,8 @@ class Actor(TorchModelV2, nn.Module):
         result = []
         for idx, t in enumerate(time):
             padding = observation[idx, : self.max_seq_len - int(t) - 1]
+            # Fill padding with 0
+            padding[:] = 0
             real_observation = observation[idx, self.max_seq_len - int(t) - 1 :]
             # Add padding to the right.
             result.append(torch.cat([real_observation, padding], dim=0))
@@ -379,6 +396,10 @@ class Actor(TorchModelV2, nn.Module):
             for idx, t in enumerate(time):
                 voxels_one_hot[idx, int(t) + 1 :] = 0
         return voxels_one_hot
+
+
+class CustomPPO(PPO):
+    _allow_unknown_configs = True
 
 
 ModelCatalog.register_custom_model("actor_model", Actor)

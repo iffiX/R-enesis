@@ -1,18 +1,13 @@
 import ray
 import numpy as np
-import experiments.gmm_voxcraft_observe_seq_rl_pretrain.model
 from ray import tune
 from ray.tune.logger import TBXLoggerCallback
-from ray.rllib.algorithms.ppo import PPO
-from experiments.gmm_voxcraft_observe_seq_rl_pretrain.utils import DataLoggerCallback
-from experiments.gmm_voxcraft_observe_seq_rl_pretrain.config import (
+from experiments.patch_voxcraft.model import CustomPPO
+from experiments.patch_voxcraft.utils import DataLoggerCallback
+from experiments.patch_voxcraft.config import (
     config,
     iters,
 )
-
-
-class CustomPPO(PPO):
-    _allow_unknown_configs = True
 
 
 if __name__ == "__main__":

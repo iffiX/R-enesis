@@ -17,20 +17,20 @@ dimension = 10
 iters = 400
 steps = 20
 workers = 1
-envs = 5
-rollout = 20
+envs = 1
+rollout = 2000
 # reference_shape = generate_sphere(dimension)
 # reference_shape = generate_3d_shape(
 #     10, 200, change_material_when_same_minor_prob=0.2, fill_num=(3,)
 # )
-# reference_shape = generate_random_ellipsoids(dimension, materials=(1, 2, 3), num=10)
-reference_shape = generate_inversed_random_ellipsoids(dimension, material=1, num=10)
+reference_shape = generate_random_ellipsoids(dimension, materials=(1, 2, 3), num=10)
+# reference_shape = generate_inversed_random_ellipsoids(dimension, material=1, num=10)
 # reference_shape = generate_cross(dimension)
 config = {
     "env": VirtualShapeGMMEnvironment,
     "env_config": {
         "dimension_size": dimension,
-        "materials": (0, 1),
+        "materials": (0, 1, 2, 3),
         "max_gaussian_num": 100,
         "max_steps": steps,
         "reference_shape": reference_shape,
@@ -44,8 +44,8 @@ config = {
     "num_sgd_iter": 30,
     "train_batch_size": steps * workers * envs * rollout,
     "lr": 1e-4,
-    "rollout_fragment_length": steps * envs * rollout,
-    "vf_clip_param": 10 ** 5,
+    "rollout_fragment_length": steps,
+    "vf_clip_param": 10**5,
     "seed": 132434,
     "num_workers": workers,
     "num_gpus": 1,
@@ -76,10 +76,12 @@ config = {
 
 if __name__ == "__main__":
     # 1GB heap memory, 1GB object store
-    ray.init(_memory=1 * (10 ** 9), object_store_memory=10 ** 9, num_gpus=0)
+    ray.init(_memory=1 * (10**9), object_store_memory=10**9, num_gpus=0)
 
     algo = PPO(config=config)
-    algo.restore("/home/iffi/data2/checkpoint_000380")
+    algo.restore(
+        "/home/mlw0504/ray_results/PPO_2023-04-28_12-13-29/PPO_VirtualShapeGMMEnvironment_ff04f_00000_0_2023-04-28_12-13-29/checkpoint_000140_bak"
+    )
 
     # Create the env to do inference in.
     env = VirtualShapeGMMEnvironment(config["env_config"])
@@ -105,11 +107,13 @@ if __name__ == "__main__":
     for i in range(20):
         # Compute an action (`a`).
         a, state_out, *_ = algo.compute_single_action(
-            observation=obs, state=state, explore=True,
+            observation=obs,
+            state=state,
+            explore=False,
         )
         # Send the computed action `a` to the env.
+        print(a)
         obs, reward, done, _ = env.step(a)
-        # print(a)
         print(env.env_model.scale(normalize(a)))
         episode_reward += reward
 

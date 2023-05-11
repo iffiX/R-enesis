@@ -7,7 +7,11 @@ from renesis.env_model.gmm import (
     GMMModel,
     GMMObserveWithVoxelModel,
     GMMObserveWithVoxelAndRemainingStepsModel,
+    GMMWithoutSigmaModel,
+    GMMWSObserveWithVoxelModel,
+    GMMWSObserveWithVoxelAndRemainingStepsModel,
     normalize,
+    time_observe_wrapper,
 )
 
 
@@ -15,6 +19,7 @@ class VirtualShapeBaseEnvironment(gym.Env):
     metadata = {"render.modes": ["rgb_array"]}
 
     def __init__(self, config, env_model, materials):
+        self.config = config
         self.plotter = Plotter()
         self.env_model = env_model
         self.materials = materials
@@ -36,6 +41,7 @@ class VirtualShapeBaseEnvironment(gym.Env):
         return self.env_model.observe()
 
     def step(self, action):
+        # print(action)
         self.env_model.step(action)
         reward = self.get_reward()
         reward_diff = reward - self.previous_reward
@@ -157,15 +163,20 @@ class VirtualShapeCPPNEnvironment(VirtualShapeBaseEnvironment):
 
 class VirtualShapeGMMEnvironment(VirtualShapeBaseEnvironment):
     def __init__(self, config):
-        env_model = GMMModel(
-            materials=config["materials"],
-            dimension_size=config["dimension_size"],
-            max_gaussian_num=config["max_gaussian_num"],
+        env_model = time_observe_wrapper(
+            GMMModel(
+                materials=config["materials"],
+                dimension_size=config["dimension_size"],
+                max_gaussian_num=config["max_gaussian_num"],
+            ),
+            wrap=config.get("observe_time", False),
         )
         super().__init__(config, env_model, env_model.materials)
 
     def step(self, action):
-        return super().step(normalize(action))
+        return super().step(
+            normalize(action, mode=self.config.get("normalize_mode", "clip"))
+        )
 
     def render(self, mode="rgb_array"):
         if mode == "rgb_array":
@@ -178,10 +189,13 @@ class VirtualShapeGMMEnvironment(VirtualShapeBaseEnvironment):
 
 class VirtualShapeGMMObserveWithVoxelEnvironment(VirtualShapeGMMEnvironment):
     def __init__(self, config):
-        env_model = GMMObserveWithVoxelModel(
-            materials=config["materials"],
-            dimension_size=config["dimension_size"],
-            max_gaussian_num=config["max_gaussian_num"],
+        env_model = time_observe_wrapper(
+            GMMObserveWithVoxelModel(
+                materials=config["materials"],
+                dimension_size=config["dimension_size"],
+                max_gaussian_num=config["max_gaussian_num"],
+            ),
+            wrap=config.get("observe_time", False),
         )
         super(VirtualShapeGMMEnvironment, self).__init__(
             config, env_model, env_model.materials
@@ -192,12 +206,71 @@ class VirtualShapeGMMObserveWithVoxelAndRemainingStepsEnvironment(
     VirtualShapeGMMEnvironment
 ):
     def __init__(self, config):
-        env_model = GMMObserveWithVoxelAndRemainingStepsModel(
-            materials=config["materials"],
-            dimension_size=config["dimension_size"],
-            max_gaussian_num=config["max_gaussian_num"],
-            reset_seed=config.get(config["reset_seed"], 42),
-            reset_remaining_steps_range=config.get("reset_remaining_steps_range", None),
+        env_model = time_observe_wrapper(
+            GMMObserveWithVoxelAndRemainingStepsModel(
+                materials=config["materials"],
+                dimension_size=config["dimension_size"],
+                max_gaussian_num=config["max_gaussian_num"],
+                reset_seed=config.get(config["reset_seed"], 42),
+                reset_remaining_steps_range=config.get(
+                    "reset_remaining_steps_range", None
+                ),
+            ),
+            wrap=config.get("observe_time", False),
+        )
+        super(VirtualShapeGMMEnvironment, self).__init__(
+            config, env_model, env_model.materials
+        )
+
+
+class VirtualShapeGMMWSEnvironment(VirtualShapeGMMEnvironment):
+    def __init__(self, config):
+        env_model = time_observe_wrapper(
+            GMMWithoutSigmaModel(
+                materials=config["materials"],
+                dimension_size=config["dimension_size"],
+                max_gaussian_num=config["max_gaussian_num"],
+                sigma=config["sigma"],
+            ),
+            wrap=config.get("observe_time", False),
+        )
+        super(VirtualShapeGMMEnvironment, self).__init__(
+            config, env_model, env_model.materials
+        )
+
+
+class VirtualShapeGMMWSObserveWithVoxelEnvironment(VirtualShapeGMMEnvironment):
+    def __init__(self, config):
+        env_model = time_observe_wrapper(
+            GMMWSObserveWithVoxelModel(
+                materials=config["materials"],
+                dimension_size=config["dimension_size"],
+                max_gaussian_num=config["max_gaussian_num"],
+                sigma=config["sigma"],
+            ),
+            wrap=config.get("observe_time", False),
+        )
+        super(VirtualShapeGMMEnvironment, self).__init__(
+            config, env_model, env_model.materials
+        )
+
+
+class VirtualShapeGMMWSObserveWithVoxelAndRemainingStepsEnvironment(
+    VirtualShapeGMMEnvironment
+):
+    def __init__(self, config):
+        env_model = time_observe_wrapper(
+            GMMWSObserveWithVoxelAndRemainingStepsModel(
+                materials=config["materials"],
+                dimension_size=config["dimension_size"],
+                max_gaussian_num=config["max_gaussian_num"],
+                sigma=config["sigma"],
+                reset_seed=config.get(config["reset_seed"], 42),
+                reset_remaining_steps_range=config.get(
+                    "reset_remaining_steps_range", None
+                ),
+            ),
+            wrap=config.get("observe_time", False),
         )
         super(VirtualShapeGMMEnvironment, self).__init__(
             config, env_model, env_model.materials

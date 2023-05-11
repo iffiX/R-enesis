@@ -17,9 +17,9 @@ from renesis.utils.debug import enable_debugger
 dimension = 10
 iters = 400
 steps = 20
-workers = 32
+workers = 20
 envs = 5
-rollout = 20
+rollout = 5
 
 # reference_shape = generate_sphere(dimension)
 # reference_shape = generate_3d_shape(
@@ -34,7 +34,7 @@ config = {
     "env_config": {
         "dimension_size": dimension,
         "materials": (0, 1, 2, 3),
-        "max_gaussian_num": 100,
+        "max_gaussian_num": steps,
         "max_steps": steps,
         "reference_shape": reference_shape,
         "reward_type": "multi_f1",
@@ -47,8 +47,8 @@ config = {
     "num_sgd_iter": 30,
     "train_batch_size": steps * workers * envs * rollout,
     "lr": 1e-4,
-    "rollout_fragment_length": steps * envs * rollout,
-    "vf_clip_param": 10 ** 5,
+    "rollout_fragment_length": steps,
+    "vf_clip_param": 10**5,
     "seed": 132434,
     "num_workers": workers,
     "num_gpus": 1,
@@ -58,8 +58,12 @@ config = {
     # Set up a separate evaluation worker set for the
     # `algo.evaluate()` call after training (see below).
     "evaluation_interval": 1,
-    "evaluation_duration": 10,
+    "evaluation_duration": 1,
     "evaluation_num_workers": 1,
+    "evaluation_config": {
+        "render_env": False,
+        "explore": False,
+    },
     "model": {
         "custom_model": "actor_model",
         "max_seq_len": steps,
@@ -79,7 +83,7 @@ config = {
 
 if __name__ == "__main__":
     # 1GB heap memory, 1GB object store
-    ray.init(_memory=1 * (10 ** 9), object_store_memory=10 ** 9)
+    ray.init(_memory=1 * (10**9), object_store_memory=10**9)
 
     tune.run(
         PPO,

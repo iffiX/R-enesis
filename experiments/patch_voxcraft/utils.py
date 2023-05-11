@@ -7,9 +7,9 @@ from ray.tune.logger import LoggerCallback
 from ray.tune.result import TIMESTEPS_TOTAL, TRAINING_ITERATION
 from ray.rllib.algorithms.callbacks import DefaultCallbacks
 from renesis.env.voxcraft import (
-    VoxcraftSingleRewardGMMObserveWithVoxelAndRemainingStepsEnvironment,
+    VoxcraftSingleRewardPatchEnvironment,
 )
-from renesis.env_model.gmm import GMMObserveWithVoxelAndRemainingStepsModel
+from renesis.env_model.patch import PatchModel
 from renesis.utils.metrics import (
     get_volume,
     get_surface_area,
@@ -47,22 +47,29 @@ def render(history):
 
 
 class CustomCallbacks(DefaultCallbacks):
-    def on_algorithm_init(
+    def on_episode_start(self, *, worker, base_env, policies, episode, **kwargs):
+        episode.media["episode_data"] = {
+            "steps": [],
+            "step_dists": [],
+            "reward": 0,
+            "robot": "",
+            "patches": None,
+            "voxels": None,
+        }
+
+    def on_episode_step(
         self,
         *,
-        algorithm: "Algorithm",
+        worker,
+        base_env,
+        policies,
+        episode,
         **kwargs,
     ) -> None:
-        load_pretrain_path = algorithm.config.get("weight_export_path", None)
-        if load_pretrain_path is not None:
-            algorithm.workers.local_worker().get_policy().set_weights(
-                t.load(load_pretrain_path)
-            )
-            algorithm.workers.sync_weights()
-            print("Pretrain weights loaded")
-
-    def on_episode_start(self, *, worker, base_env, policies, episode, **kwargs):
-        episode.media["episode_data"] = {}
+        episode.media["episode_data"]["step_dists"].append(
+            episode.last_extra_action_outs_for()["action_dist_inputs"]
+        )
+        episode.media["episode_data"]["steps"].append(episode.last_action_for())
 
     def on_episode_end(
         self,
@@ -85,14 +92,16 @@ class CustomCallbacks(DefaultCallbacks):
                 "after episode is done!"
             )
 
-        env = (
-            base_env.vector_env
-        )  # type: VoxcraftSingleRewardGMMObserveWithVoxelAndRemainingStepsEnvironment
+        env = base_env.vector_env  # type: VoxcraftSingleRewardPatchEnvironment
+        episode.media["episode_data"]["steps"] = np.stack(
+            episode.media["episode_data"]["steps"]
+        )
         episode.media["episode_data"]["reward"] = env.end_rewards[env_index]
         episode.media["episode_data"]["robot"] = env.end_robots[env_index]
-        # May be also record state data (gaussians) ?
-        # episode.media["episode_data"]["state_data"] = env.end_state_data[env_index]
-
+        episode.media["episode_data"]["patches"] = env.end_state_data[env_index][0]
+        episode.media["episode_data"]["voxels"] = env.end_state_data[env_index][
+            1
+        ].astype(np.int8)
         episode.custom_metrics["real_reward"] = env.end_rewards[env_index]
         metrics = self.get_robot_metric(env.env_models[env_index])
         episode.custom_metrics.update(metrics)
@@ -127,14 +136,15 @@ class CustomCallbacks(DefaultCallbacks):
                         best_robot = episode_data["robot"]
 
                 result["evaluation"]["episode_media"] = {
+                    "raw_data": data,
                     "episode_data": {
                         "rewards": rewards,
                         "best_reward": best_reward,
                         "best_robot": best_robot,
-                    }
+                    },
                 }
 
-    def get_robot_metric(self, env_model: GMMObserveWithVoxelAndRemainingStepsModel):
+    def get_robot_metric(self, env_model: PatchModel):
         voxels = env_model.get_voxels()
         metrics = {}
         metrics["volume"] = get_volume(voxels)
@@ -148,10 +158,10 @@ class CustomCallbacks(DefaultCallbacks):
         )
         metrics["section_num"] = get_section_num(voxels)
         metrics["reflection_symmetry"] = get_reflection_symmetry(voxels)
-        total_steps = env_model.initial_remaining_steps
-        gaussians = env_model.get_state_data()
-        zero_steps = np.sum(np.argmax(gaussians[:, 6:], axis=-1) == 0)
-        metrics["zero_step_ratio"] = zero_steps / total_steps
+        # total_steps = env_model.initial_remaining_steps
+        # gaussians = env_model.get_state_data()[0]
+        # zero_steps = np.sum(np.argmax(gaussians[:, 3:], axis=-1) == 0)
+        # metrics["zero_step_ratio"] = zero_steps / total_steps
         return metrics
 
 
@@ -172,6 +182,7 @@ class DataLoggerCallback(LoggerCallback):
     def log_trial_result(self, iteration, trial, result):
         iteration = result[TRAINING_ITERATION]
         if "evaluation" in result:
+            raw_data = result["evaluation"]["episode_media"].get("raw_data", None)
             data = result["evaluation"]["episode_media"].get("episode_data", None)
             result["evaluation"]["episode_media"] = {}
             if data:
@@ -197,37 +208,53 @@ class DataLoggerCallback(LoggerCallback):
                     print(metrics)
                     pickle.dump(metrics, file)
 
-                robot = data["best_robot"]
-                simulator = Voxcraft()
-                _, (sim_history,) = simulator.run_sims([self.base_config], [robot])
-                frames = render(sim_history)
+                with open(
+                    os.path.join(
+                        self._trial_local_dir[trial],
+                        f"data_it_{iteration}_rew_{data['best_reward']}.data",
+                    ),
+                    "wb",
+                ) as file:
+                    pickle.dump(raw_data, file)
 
-                if frames is not None:
-                    path = os.path.join(
-                        self._trial_local_dir[trial],
-                        f"rendered_it_{iteration}_rew_{data['best_reward']}.gif",
-                    )
-                    print(f"Saving rendered results to {path}")
-                    wait = create_video_subproc(
-                        [f for f in frames],
-                        path=self._trial_local_dir[trial],
-                        filename=f"rendered_it_{iteration}",
-                        extension=".gif",
-                    )
-                    path = os.path.join(
-                        self._trial_local_dir[trial],
-                        f"robot_it_{iteration}_rew_{data['best_reward']}.vxd",
-                    )
-                    with open(path, "w") as file:
-                        print(f"Saving robot to {path}")
-                        file.write(robot)
-                    path = os.path.join(
-                        self._trial_local_dir[trial],
-                        f"run_it_{iteration}_rew_{data['best_reward']}.history",
-                    )
-                    with open(path, "w") as file:
-                        print(f"Saving history to {path}")
-                        file.write(sim_history)
-                    wait()
+                robot = data["best_robot"]
+                path = os.path.join(
+                    self._trial_local_dir[trial],
+                    f"robot_it_{iteration}_rew_{data['best_reward']}.vxd",
+                )
+                with open(path, "w") as file:
+                    print(f"Saving robot to {path}")
+                    file.write(robot)
+                # simulator = Voxcraft()
+                # _, (sim_history,) = simulator.run_sims([self.base_config], [robot])
+                # frames = render(sim_history)
+                #
+                # if frames is not None:
+                #     path = os.path.join(
+                #         self._trial_local_dir[trial],
+                #         f"rendered_it_{iteration}_rew_{data['best_reward']}.gif",
+                #     )
+                #     print(f"Saving rendered results to {path}")
+                #     wait = create_video_subproc(
+                #         [f for f in frames],
+                #         path=self._trial_local_dir[trial],
+                #         filename=f"rendered_it_{iteration}",
+                #         extension=".gif",
+                #     )
+                #     path = os.path.join(
+                #         self._trial_local_dir[trial],
+                #         f"robot_it_{iteration}_rew_{data['best_reward']}.vxd",
+                #     )
+                #     with open(path, "w") as file:
+                #         print(f"Saving robot to {path}")
+                #         file.write(robot)
+                #     path = os.path.join(
+                #         self._trial_local_dir[trial],
+                #         f"run_it_{iteration}_rew_{data['best_reward']}.history",
+                #     )
+                #     with open(path, "w") as file:
+                #         print(f"Saving history to {path}")
+                #         file.write(sim_history)
+                #     wait()
 
             print("Saving completed")
