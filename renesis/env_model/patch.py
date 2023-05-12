@@ -31,6 +31,8 @@ class PatchModel(BaseModel):
         self.prev_voxels = np.zeros(dimension_size, dtype=np.float32)
         self.voxels = np.zeros(dimension_size, dtype=np.float32)
         self.occupied = np.zeros(dimension_size, dtype=np.bool)
+        self.robot_voxels = np.zeros(dimension_size, dtype=np.float32)
+        self.robot_occupied = np.zeros(dimension_size, dtype=np.bool)
         self.invalid_count = 0
         self.is_robot_valid = False
         self.update_voxels()
@@ -74,31 +76,20 @@ class PatchModel(BaseModel):
         return self.voxels.reshape(-1)
 
     def get_robot(self):
-        labels, label_num = cc3d.connected_components(
-            self.occupied, connectivity=6, return_N=True, out_dtype=np.uint32
-        )
-        count = np.bincount(labels.reshape(-1), minlength=label_num)
-        # Ignore label 0, which is non-occupied space
-        count[0] = 0
-        largest_connected_component = labels == np.argmax(count)
-        largest_connected_component_voxels = np.where(
-            largest_connected_component, self.voxels, 0
-        )
-
         x_occupied = [
             x
-            for x in range(largest_connected_component.shape[0])
-            if np.any(largest_connected_component[x])
+            for x in range(self.robot_occupied.shape[0])
+            if np.any(self.robot_occupied[x])
         ]
         y_occupied = [
             y
-            for y in range(largest_connected_component.shape[1])
-            if np.any(largest_connected_component[:, y])
+            for y in range(self.robot_occupied.shape[1])
+            if np.any(self.robot_occupied[:, y])
         ]
         z_occupied = [
             z
-            for z in range(largest_connected_component.shape[2])
-            if np.any(largest_connected_component[:, :, z])
+            for z in range(self.robot_occupied.shape[2])
+            if np.any(self.robot_occupied[:, :, z])
         ]
         min_x = min(x_occupied)
         max_x = max(x_occupied) + 1
@@ -110,7 +101,7 @@ class PatchModel(BaseModel):
 
         for z in range(min_z, max_z):
             layer_representation = (
-                largest_connected_component_voxels[min_x:max_x, min_y:max_y, z]
+                self.robot_voxels[min_x:max_x, min_y:max_y, z]
                 .astype(int)
                 .flatten(order="F")
                 .tolist(),
@@ -122,17 +113,7 @@ class PatchModel(BaseModel):
         return (max_x - min_x, max_y - min_y, max_z - min_z), representation
 
     def get_robot_voxels(self):
-        labels, label_num = cc3d.connected_components(
-            self.occupied, connectivity=6, return_N=True, out_dtype=np.uint32
-        )
-        count = np.bincount(labels.reshape(-1), minlength=label_num)
-        # Ignore label 0, which is non-occupied space
-        count[0] = 0
-        largest_connected_component = labels == np.argmax(count)
-        largest_connected_component_voxels = np.where(
-            largest_connected_component, self.voxels, 0
-        )
-        return largest_connected_component_voxels
+        return self.robot_voxels
 
     def get_voxels(self):
         return self.voxels
@@ -208,5 +189,15 @@ class PatchModel(BaseModel):
                 coords[:, 2] + self.center_voxel_offset[2],
             ] = material
 
-        self.occupied = self.voxels[:, :, :] != 0
-        self.is_robot_valid = np.any(self.occupied)
+        self.occupied = self.voxels != 0
+
+        labels, label_num = cc3d.connected_components(
+            self.occupied, connectivity=6, return_N=True, out_dtype=np.uint32
+        )
+        count = np.bincount(labels.reshape(-1), minlength=label_num)
+        # Ignore label 0, which is non-occupied space
+        count[0] = 0
+        largest_connected_component = labels == np.argmax(count)
+        self.robot_voxels = np.where(largest_connected_component, self.voxels, 0)
+        self.robot_occupied = self.robot_voxels != 0
+        self.is_robot_valid = np.any(self.robot_occupied)

@@ -114,35 +114,64 @@ class CustomCallbacks(DefaultCallbacks):
         trainer,
         **kwargs,
     ) -> None:
-        # Remove non-evaluation data
+        # # Remove non-evaluation data
+        # result["episode_media"] = {}
+        # # print("Custom metrics:")
+        # # print(result["custom_metrics"])
+        # if "sampler_results" in result:
+        #     result["sampler_results"]["episode_media"] = {}
+        #
+        # if "evaluation" in result:
+        #     data = result["evaluation"]["episode_media"].get("episode_data", [])
+        #
+        #     if len(data) > 0:
+        #         # Aggregate results
+        #         rewards = []
+        #         best_reward = -np.inf
+        #         best_robot = None
+        #         for episode_data in data:
+        #             rewards.append(episode_data["reward"])
+        #             if episode_data["reward"] > best_reward:
+        #                 best_reward = episode_data["reward"]
+        #                 best_robot = episode_data["robot"]
+        #
+        #         result["evaluation"]["episode_media"] = {
+        #             "raw_data": data,
+        #             "episode_data": {
+        #                 "rewards": rewards,
+        #                 "best_reward": best_reward,
+        #                 "best_robot": best_robot,
+        #             },
+        #         }
+
+        # Use sampled data from training instead of evaluation to speed up
+        # Note that the first epoch of data, the model is untrained, while for
+        # evaluation, since it is performed after training PPO, the model is
+        # trained for 1 epoch
+        data = result["sampler_results"]["episode_media"].get("episode_data", [])
+
         result["episode_media"] = {}
-        # print("Custom metrics:")
-        # print(result["custom_metrics"])
         if "sampler_results" in result:
             result["sampler_results"]["episode_media"] = {}
 
-        if "evaluation" in result:
-            data = result["evaluation"]["episode_media"].get("episode_data", [])
+        # Aggregate results
+        rewards = []
+        best_reward = -np.inf
+        best_robot = None
+        for episode_data in data:
+            rewards.append(episode_data["reward"])
+            if episode_data["reward"] > best_reward:
+                best_reward = episode_data["reward"]
+                best_robot = episode_data["robot"]
 
-            if len(data) > 0:
-                # Aggregate results
-                rewards = []
-                best_reward = -np.inf
-                best_robot = None
-                for episode_data in data:
-                    rewards.append(episode_data["reward"])
-                    if episode_data["reward"] > best_reward:
-                        best_reward = episode_data["reward"]
-                        best_robot = episode_data["robot"]
-
-                result["evaluation"]["episode_media"] = {
-                    "raw_data": data,
-                    "episode_data": {
-                        "rewards": rewards,
-                        "best_reward": best_reward,
-                        "best_robot": best_robot,
-                    },
-                }
+        result["episode_media"] = {
+            "raw_data": data,
+            "episode_data": {
+                "rewards": rewards,
+                "best_reward": best_reward,
+                "best_robot": best_robot,
+            },
+        }
 
     def get_robot_metric(self, env_model: PatchModel):
         voxels = env_model.get_voxels()
@@ -158,10 +187,6 @@ class CustomCallbacks(DefaultCallbacks):
         )
         metrics["section_num"] = get_section_num(voxels)
         metrics["reflection_symmetry"] = get_reflection_symmetry(voxels)
-        # total_steps = env_model.initial_remaining_steps
-        # gaussians = env_model.get_state_data()[0]
-        # zero_steps = np.sum(np.argmax(gaussians[:, 3:], axis=-1) == 0)
-        # metrics["zero_step_ratio"] = zero_steps / total_steps
         return metrics
 
 
@@ -181,90 +206,107 @@ class DataLoggerCallback(LoggerCallback):
 
     def log_trial_result(self, iteration, trial, result):
         iteration = result[TRAINING_ITERATION]
-        if "evaluation" in result:
-            raw_data = result["evaluation"]["episode_media"].get("raw_data", None)
-            data = result["evaluation"]["episode_media"].get("episode_data", None)
-            result["evaluation"]["episode_media"] = {}
-            if data:
-                log_file = os.path.join(self._trial_local_dir[trial], "metric.data")
-                metrics = []
-                if os.path.exists(log_file):
-                    with open(log_file, "rb") as file:
-                        metrics = pickle.load(file)
-                with open(log_file, "wb") as file:
-                    history_best_reward = -np.inf
-                    for history_metric in metrics:
-                        if history_metric[0] > history_best_reward:
-                            history_best_reward = history_metric[0]
-                    metrics += [
-                        (
-                            max(history_best_reward, np.max(data["rewards"])),
-                            np.max(data["rewards"]),
-                            np.mean(data["rewards"]),
-                            np.min(data["rewards"]),
-                            result["evaluation"].get("custom_metrics", None),
-                        )
-                    ]
-                    print(metrics)
-                    pickle.dump(metrics, file)
+        step = result[TIMESTEPS_TOTAL]
 
-                with open(
-                    os.path.join(
-                        self._trial_local_dir[trial],
-                        f"data_it_{iteration}_rew_{data['best_reward']}.data",
-                    ),
-                    "wb",
-                ) as file:
-                    pickle.dump(raw_data, file)
+        # raw_data = result["evaluation"]["episode_media"].get("raw_data", None)
+        # data = result["evaluation"]["episode_media"].get("episode_data", None)
+        # custom_metrics = result["evaluation"].get("custom_metrics", None)
+        # result["evaluation"]["episode_media"] = {}
 
-                simulator = Voxcraft()
+        raw_data = result["episode_media"].get("raw_data", None)
+        data = result["episode_media"].get("episode_data", None)
+        custom_metrics = result.get("custom_metrics", None)
+        result["episode_media"] = {}
 
-                robot = data["best_robot"]
-                path = os.path.join(
+        self.process_data(
+            iteration=iteration,
+            step=step,
+            trial=trial,
+            raw_data=raw_data,
+            data=data,
+            custom_metrics=custom_metrics,
+        )
+
+    def process_data(self, iteration, step, trial, raw_data, data, custom_metrics):
+        if data:
+            log_file = os.path.join(self._trial_local_dir[trial], "metric.data")
+            metrics = []
+            if os.path.exists(log_file):
+                with open(log_file, "rb") as file:
+                    metrics = pickle.load(file)
+            with open(log_file, "wb") as file:
+                history_best_reward = -np.inf
+                for history_metric in metrics:
+                    if history_metric[0] > history_best_reward:
+                        history_best_reward = history_metric[0]
+                metrics += [
+                    (
+                        max(history_best_reward, np.max(data["rewards"])),
+                        np.max(data["rewards"]),
+                        np.mean(data["rewards"]),
+                        np.min(data["rewards"]),
+                        custom_metrics,
+                    )
+                ]
+                pickle.dump(metrics, file)
+
+            with open(
+                os.path.join(
                     self._trial_local_dir[trial],
-                    f"robot_it_{iteration}_rew_{data['best_reward']}.vxd",
-                )
-                with open(path, "w") as file:
-                    print(f"Saving robot to {path}")
-                    file.write(robot)
+                    f"data_it_{iteration}_rew_{data['best_reward']}.data",
+                ),
+                "wb",
+            ) as file:
+                pickle.dump(raw_data, file)
 
-                _, (sim_history,) = simulator.run_sims([self.base_config], [robot])
-                path = os.path.join(
-                    self._trial_local_dir[trial],
-                    f"run_it_{iteration}_rew_{data['best_reward']}.history",
-                )
-                with open(path, "w") as file:
-                    print(f"Saving history to {path}")
-                    file.write(sim_history)
+            simulator = Voxcraft()
 
-                # frames = render(sim_history)
-                #
-                # if frames is not None:
-                #     path = os.path.join(
-                #         self._trial_local_dir[trial],
-                #         f"rendered_it_{iteration}_rew_{data['best_reward']}.gif",
-                #     )
-                #     print(f"Saving rendered results to {path}")
-                #     wait = create_video_subproc(
-                #         [f for f in frames],
-                #         path=self._trial_local_dir[trial],
-                #         filename=f"rendered_it_{iteration}",
-                #         extension=".gif",
-                #     )
-                #     path = os.path.join(
-                #         self._trial_local_dir[trial],
-                #         f"robot_it_{iteration}_rew_{data['best_reward']}.vxd",
-                #     )
-                #     with open(path, "w") as file:
-                #         print(f"Saving robot to {path}")
-                #         file.write(robot)
-                #     path = os.path.join(
-                #         self._trial_local_dir[trial],
-                #         f"run_it_{iteration}_rew_{data['best_reward']}.history",
-                #     )
-                #     with open(path, "w") as file:
-                #         print(f"Saving history to {path}")
-                #         file.write(sim_history)
-                #     wait()
+            robot = data["best_robot"]
+            path = os.path.join(
+                self._trial_local_dir[trial],
+                f"robot_it_{iteration}_rew_{data['best_reward']}.vxd",
+            )
+            with open(path, "w") as file:
+                print(f"Saving robot to {path}")
+                file.write(robot)
 
-            print("Saving completed")
+            _, (sim_history,) = simulator.run_sims([self.base_config], [robot])
+            path = os.path.join(
+                self._trial_local_dir[trial],
+                f"run_it_{iteration}_rew_{data['best_reward']}.history",
+            )
+            with open(path, "w") as file:
+                print(f"Saving history to {path}")
+                file.write(sim_history)
+
+            # frames = render(sim_history)
+            #
+            # if frames is not None:
+            #     path = os.path.join(
+            #         self._trial_local_dir[trial],
+            #         f"rendered_it_{iteration}_rew_{data['best_reward']}.gif",
+            #     )
+            #     print(f"Saving rendered results to {path}")
+            #     wait = create_video_subproc(
+            #         [f for f in frames],
+            #         path=self._trial_local_dir[trial],
+            #         filename=f"rendered_it_{iteration}",
+            #         extension=".gif",
+            #     )
+            #     path = os.path.join(
+            #         self._trial_local_dir[trial],
+            #         f"robot_it_{iteration}_rew_{data['best_reward']}.vxd",
+            #     )
+            #     with open(path, "w") as file:
+            #         print(f"Saving robot to {path}")
+            #         file.write(robot)
+            #     path = os.path.join(
+            #         self._trial_local_dir[trial],
+            #         f"run_it_{iteration}_rew_{data['best_reward']}.history",
+            #     )
+            #     with open(path, "w") as file:
+            #         print(f"Saving history to {path}")
+            #         file.write(sim_history)
+            #     wait()
+
+        print("Saving completed")

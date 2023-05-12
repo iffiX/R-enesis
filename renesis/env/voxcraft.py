@@ -442,7 +442,7 @@ class VoxcraftSingleRewardBaseEnvironment(VectorEnv):
 
         # if len(self.env_models) == 1:
         # print(actions)
-        print([f"{r:.3f}" for r in reward_signals])
+        # print([f"{r:.3f}" for r in reward_signals])
         return (
             [model.observe() for model in self.env_models],
             reward_signals,
