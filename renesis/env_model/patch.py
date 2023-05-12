@@ -10,14 +10,17 @@ class PatchModel(BaseModel):
     def __init__(
         self,
         materials=(0, 1, 2),
-        dimension_size=20,
+        dimension_size=(20, 20, 20),
         patch_size=1,
         max_patch_num=100,
     ):
+        assert len(dimension_size) == 3
+        dimension_size = list(dimension_size)
         super().__init__()
         self.materials = materials
         self.dimension_size = dimension_size
-        self.center_voxel_offset = self.dimension_size // 2
+        self.voxel_num = dimension_size[0] * dimension_size[1] * dimension_size[2]
+        self.center_voxel_offset = [size // 2 for size in dimension_size]
         self.patch_size = patch_size
         self.max_patch_num = max_patch_num
 
@@ -25,9 +28,9 @@ class PatchModel(BaseModel):
         # first 3 elements are mean (x, y, z)
         # Remaining elements are material weights
         self.patches = []  # type: List[np.ndarray]
-        self.prev_voxels = np.zeros([self.dimension_size] * 3, dtype=np.float32)
-        self.voxels = np.zeros([self.dimension_size] * 3, dtype=np.float32)
-        self.occupied = np.zeros([self.dimension_size] * 3, dtype=np.bool)
+        self.prev_voxels = np.zeros(dimension_size, dtype=np.float32)
+        self.voxels = np.zeros(dimension_size, dtype=np.float32)
+        self.occupied = np.zeros(dimension_size, dtype=np.bool)
         self.invalid_count = 0
         self.is_robot_valid = False
         self.update_voxels()
@@ -40,11 +43,11 @@ class PatchModel(BaseModel):
     def observation_space(self):
         return Box(
             low=np.array(
-                (min(min(self.materials), 0),) * self.dimension_size**3,
+                (min(min(self.materials), 0),) * self.voxel_num,
                 dtype=np.float32,
             ),
             high=np.array(
-                (max(max(self.materials), 0),) * self.dimension_size**3,
+                (max(max(self.materials), 0),) * self.voxel_num,
                 dtype=np.float32,
             ),
         )
@@ -118,7 +121,7 @@ class PatchModel(BaseModel):
             representation.append(layer_representation)
         return (max_x - min_x, max_y - min_y, max_z - min_z), representation
 
-    def get_largest_connected_component_voxels(self):
+    def get_robot_voxels(self):
         labels, label_num = cc3d.connected_components(
             self.occupied, connectivity=6, return_N=True, out_dtype=np.uint32
         )
@@ -138,25 +141,25 @@ class PatchModel(BaseModel):
         return np.stack(self.patches), self.voxels
 
     def scale(self, action):
-        min_value = -self.center_voxel_offset - 0.5
-        return np.array(
-            [min_value, min_value, min_value] + [0] * len(self.materials)
-        ) + action * np.array(
-            [self.dimension_size, self.dimension_size, self.dimension_size]
-            + [1] * len(self.materials)
+        min_value = [-offset - 0.5 for offset in self.center_voxel_offset]
+        return np.array(min_value + [0] * len(self.materials)) + action * np.array(
+            self.dimension_size + [1] * len(self.materials)
         )
 
     def update_voxels(self):
         # generate coordinates
         # Eg: if dimension size is 20, indices are [-10, ..., 9]
         # if dimension size if 21, indices are [-10, ..., 10]
-        indices = list(
-            range(
-                -self.center_voxel_offset,
-                self.dimension_size - self.center_voxel_offset,
+        indices = [
+            list(
+                range(
+                    -offset,
+                    size - offset,
+                )
             )
-        )
-        coords = np.stack(np.meshgrid(indices, indices, indices, indexing="ij"))
+            for size, offset in zip(self.dimension_size, self.center_voxel_offset)
+        ]
+        coords = np.stack(np.meshgrid(*indices, indexing="ij"))
         # coords shape [coord_num, 3]
         coords = np.transpose(coords.reshape([coords.shape[0], -1]))
         all_values = []
@@ -183,7 +186,7 @@ class PatchModel(BaseModel):
             all_values.append(covered * (idx + 1))
 
         self.voxels = np.zeros(
-            [self.dimension_size] * 3,
+            self.dimension_size,
             dtype=np.float32,
         )
 
@@ -200,20 +203,10 @@ class PatchModel(BaseModel):
             )
 
             self.voxels[
-                coords[:, 0] + self.center_voxel_offset,
-                coords[:, 1] + self.center_voxel_offset,
-                coords[:, 2] + self.center_voxel_offset,
+                coords[:, 0] + self.center_voxel_offset[0],
+                coords[:, 1] + self.center_voxel_offset[1],
+                coords[:, 2] + self.center_voxel_offset[2],
             ] = material
-
-        # self.occupied = self.voxels[:, :, :] != 0
-        # prev_is_valid = self.is_robot_valid
-        # self.is_robot_valid = is_voxel_continuous(self.occupied) and np.any(
-        #     self.occupied
-        # )
-        # if self.steps != 0 and not prev_is_valid and not self.is_robot_valid:
-        #     self.invalid_count += 1
-        # else:
-        #     self.invalid_count = 0
 
         self.occupied = self.voxels[:, :, :] != 0
         self.is_robot_valid = np.any(self.occupied)

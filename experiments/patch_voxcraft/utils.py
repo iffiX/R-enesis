@@ -116,8 +116,8 @@ class CustomCallbacks(DefaultCallbacks):
     ) -> None:
         # Remove non-evaluation data
         result["episode_media"] = {}
-        print("Custom metrics:")
-        print(result["custom_metrics"])
+        # print("Custom metrics:")
+        # print(result["custom_metrics"])
         if "sampler_results" in result:
             result["sampler_results"]["episode_media"] = {}
 
@@ -217,6 +217,8 @@ class DataLoggerCallback(LoggerCallback):
                 ) as file:
                     pickle.dump(raw_data, file)
 
+                simulator = Voxcraft()
+
                 robot = data["best_robot"]
                 path = os.path.join(
                     self._trial_local_dir[trial],
@@ -225,8 +227,16 @@ class DataLoggerCallback(LoggerCallback):
                 with open(path, "w") as file:
                     print(f"Saving robot to {path}")
                     file.write(robot)
-                # simulator = Voxcraft()
-                # _, (sim_history,) = simulator.run_sims([self.base_config], [robot])
+
+                _, (sim_history,) = simulator.run_sims([self.base_config], [robot])
+                path = os.path.join(
+                    self._trial_local_dir[trial],
+                    f"run_it_{iteration}_rew_{data['best_reward']}.history",
+                )
+                with open(path, "w") as file:
+                    print(f"Saving history to {path}")
+                    file.write(sim_history)
+
                 # frames = render(sim_history)
                 #
                 # if frames is not None:

@@ -431,8 +431,11 @@ class VoxcraftSingleRewardBaseEnvironment(VectorEnv):
                     if dist < model.patch_size:
                         reward_signals[idx] = 1
                     else:
+                        diagonal_length = np.sqrt(
+                            np.sum(np.array(model.dimension_size) ** 2)
+                        )
                         reward_signals[idx] = 1 - (dist - model.patch_size) / (
-                            model.dimension_size * np.sqrt(3) - model.patch_size
+                            diagonal_length - model.patch_size
                         )
             if evaluate:
                 reward_signals[idx] += self.end_rewards[idx]
@@ -489,7 +492,9 @@ class VoxcraftSingleRewardBaseEnvironment(VectorEnv):
                 result, voxel_size=self.voxel_size
             )
             reward = self.compute_reward_from_sim_result(
-                initial_positions, final_positions
+                initial_positions,
+                final_positions,
+                model.get_robot_voxels(),
             )
             self.end_rewards[idx] = reward
             self.end_robots[idx] = robot
@@ -537,7 +542,9 @@ class VoxcraftSingleRewardBaseEnvironment(VectorEnv):
                 )
                 return robots, out
 
-    def compute_reward_from_sim_result(self, initial_positions, final_positions):
+    def compute_reward_from_sim_result(
+        self, initial_positions, final_positions, robot_voxels
+    ):
         """
         Note: Reward should always have an initial value of 0 for empty robots.
         """
@@ -553,6 +560,13 @@ class VoxcraftSingleRewardBaseEnvironment(VectorEnv):
                 reward = table(final_positions)
         elif self.reward_type == "distance_traveled":
             reward = distance_traveled(initial_positions, final_positions)
+            if reward < 1e-3:
+                reward = 0
+        elif self.reward_type == "distance_traveled_efficiency":
+            reward = distance_traveled(initial_positions, final_positions) * (
+                np.sum(robot_voxels == 1) / np.sum(robot_voxels != 0)
+            )
+            print(f"ratio:{np.sum(robot_voxels == 1) / np.sum(robot_voxels != 0)}")
             if reward < 1e-3:
                 reward = 0
         else:

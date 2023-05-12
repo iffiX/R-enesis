@@ -67,6 +67,20 @@ class BaseModel(ABC):
         """
         raise NotImplementedError()
 
+    def get_robot_voxels(self):
+        """
+        Returns:
+            A three dimensional numpy array of shape
+            [dimension_size, dimension_size, dimension_size]
+            and dtype np.float32 specifying the voxel placement,
+            0 corresponds to empty.
+
+        Note:
+            This function only return voxels belonging to the robot we simulate,
+            other voxels are set to 0
+        """
+        raise NotImplementedError()
+
     def get_voxels(self):
         """
         Returns:

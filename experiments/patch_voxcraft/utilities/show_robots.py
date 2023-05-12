@@ -9,7 +9,7 @@ pv.global_theme.full_screen = True
 np.set_printoptions(precision=4, threshold=10000, suppress=True)
 
 if __name__ == "__main__":
-    path = "/home/mlw0504/ray_results/CustomPPO_2023-05-10_18-03-52/CustomPPO_VoxcraftSingleRewardTestPatchEnvironment_eeca8_00000_0_2023-05-10_18-03-53/data"
+    path = "/home/mlw0504/ray_results/CustomPPO_2023-05-11_19-01-21/CustomPPO_VoxcraftSingleRewardPatchEnvironment_207ce_00000_0_2023-05-11_19-01-21/data"
     # path = input("Enter path to ray experiment data directory: ")
     data_files = {}
     for file in os.listdir(path):
@@ -68,6 +68,7 @@ if __name__ == "__main__":
                         colors[data[idx]["voxels"] == 2] = "green"
                         colors[data[idx]["voxels"] == 3] = "red"
                         axs[row][col].voxels(filled, facecolors=colors)
+                        axs[row][col].axis("equal")
 
             # pv_plotter.show()
             figManager = plt.get_current_fig_manager()
