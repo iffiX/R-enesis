@@ -1,3 +1,4 @@
+import numpy as np
 from lxml import etree
 from typing import List, Tuple
 
@@ -36,19 +37,19 @@ def vxd_creator(
     else:
         phase_offsets = None
     for z in range(sizes[2]):
-        material_data = "".join([f"{m}" for m in representation[z][0]])
+        material_data = "".join(np.char.mod("%d", representation[z][0]))
         etree.SubElement(Data, "Layer").text = etree.CDATA(material_data)
 
         if representation[z][1] is not None:
-            amplitude_data = "".join([f"{p}, " for p in representation[z][1]])
+            amplitude_data = "".join(np.char.mod("%f", representation[z][1]))
             etree.SubElement(amplitudes, "Layer").text = etree.CDATA(amplitude_data)
 
         if representation[z][2] is not None:
-            frequency_data = "".join([f"{p}, " for p in representation[z][2]])
+            frequency_data = "".join(np.char.mod("%f", representation[z][2]))
             etree.SubElement(frequencies, "Layer").text = etree.CDATA(frequency_data)
 
         if representation[z][3] is not None:
-            phase_offset_data = "".join([f"{p}, " for p in representation[z][3]])
+            phase_offset_data = "".join(np.char.mod("%d", representation[z][3]))
             etree.SubElement(phase_offsets, "Layer").text = etree.CDATA(
                 phase_offset_data
             )
@@ -65,6 +66,7 @@ def vxd_creator(
 
 
 def get_voxel_positions(result, voxel_size=0.01):
+    """Note: Unit is voxels"""
     doc = etree.fromstring(bytes(result, encoding="utf-8"))
 
     def parse(x):
@@ -75,8 +77,28 @@ def get_voxel_positions(result, voxel_size=0.01):
                 p.append([float(q) / voxel_size for q in v.split(",")])
         return p
 
-    initial_positions = doc.xpath("/report/detail/voxel_initial_positions")[0].text
-    final_positions = doc.xpath("/report/detail/voxel_final_positions")[0].text
-    initial_positions = parse(initial_positions)
-    final_positions = parse(final_positions)
-    return initial_positions, final_positions
+    start_positions = doc.xpath("/report/detail/voxel_start_positions")[0].text
+    end_positions = doc.xpath("/report/detail/voxel_end_positions")[0].text
+    start_positions = parse(start_positions)
+    end_positions = parse(end_positions)
+    return start_positions, end_positions
+
+
+def get_center_of_mass(result, voxel_size=0.01):
+    """Note: Unit is voxels"""
+    doc = etree.fromstring(bytes(result, encoding="utf-8"))
+    start_com = np.array(
+        [
+            float(doc.xpath("/report/detail/start_center_of_mass/x")[0].text),
+            float(doc.xpath("/report/detail/start_center_of_mass/y")[0].text),
+            float(doc.xpath("/report/detail/start_center_of_mass/z")[0].text),
+        ]
+    )
+    end_com = np.array(
+        [
+            float(doc.xpath("/report/detail/end_center_of_mass/x")[0].text),
+            float(doc.xpath("/report/detail/end_center_of_mass/y")[0].text),
+            float(doc.xpath("/report/detail/end_center_of_mass/z")[0].text),
+        ]
+    )
+    return start_com / voxel_size, end_com / voxel_size

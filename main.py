@@ -15,12 +15,15 @@ if __name__ == "__main__":
     """
     Launch any experiment file in a temporary snapshot to prevent
     code from being changed while running.
-    
+
     python main.py experiments/some_some_experiment/some_optimize.py some_args
     """
     init_config()
     comment_file, comment_dir = get_snapshot_comment_file()
     snapshot_dir = get_snapshot(code_only=False)
+
+    with open(os.path.join(snapshot_dir, "LAUNCH_COMMAND.sh"), "w") as file:
+        file.write(" ".join([sys.executable] + sys.argv[1:]))
 
     # Move comment file to the snapshot dir, so it will be saved by the
     # experiment runners when they call get_snapshot()

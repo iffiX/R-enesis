@@ -8,14 +8,20 @@
         <Integration>
             <DtFrac>1</DtFrac>
         </Integration>
-		<StopCondition>
-			<StopConditionFormula>
+		<Condition>
+			<StopCondition>
+				<mtSUB>
+				<mtVAR>t</mtVAR>
+				<mtCONST>10</mtCONST>
+				</mtSUB>
+			</StopCondition>
+			<ResultStartCondition>
 				<mtSUB>
 				<mtVAR>t</mtVAR>
 				<mtCONST>5</mtCONST>
 				</mtSUB>
-			</StopConditionFormula>
-		</StopCondition>
+			</ResultStartCondition>
+		</Condition>
         <SavePositionOfAllVoxels>1</SavePositionOfAllVoxels>
 	    <Damping>
             <BondDampingZ>1</BondDampingZ>

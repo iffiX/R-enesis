@@ -9,7 +9,7 @@ pv.global_theme.full_screen = True
 np.set_printoptions(precision=4, threshold=10000, suppress=True)
 
 if __name__ == "__main__":
-    path = "/home/mlw0504/ray_results/CustomPPO_2023-05-11_19-01-21/CustomPPO_VoxcraftSingleRewardPatchEnvironment_207ce_00000_0_2023-05-11_19-01-21/data"
+    path = "/home/mlw0504/Projects/R-enesis_results/task_voxcraft/EXP2_T=40_V=20x20x8_b=2x2x2-cube_elastic_mod=1e5_std-bias=none_freq=4/CustomPPO_VoxcraftSingleRewardPatchEnvironment_24c5f_00000_0_2023-05-15_15-29-08/data"
     # path = input("Enter path to ray experiment data directory: ")
     data_files = {}
     for file in os.listdir(path):
@@ -73,4 +73,9 @@ if __name__ == "__main__":
             # pv_plotter.show()
             figManager = plt.get_current_fig_manager()
             figManager.window.showMaximized()
+            # fig.set_figheight(12)
+            # fig.set_figwidth(20)
+            # fig.savefig(
+            #     f"generated_data/show_robot.png", bbox_inches="tight", pad_inches=0.5
+            # )
             fig.show()

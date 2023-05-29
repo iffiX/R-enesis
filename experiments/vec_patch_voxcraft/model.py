@@ -65,7 +65,7 @@ class Actor(TorchModelV2, nn.Module):
             nn.ReLU(),
             nn.Flatten(),
             nn.Linear(
-                int(np.prod([size // 2 for size in dimension_size])),
+                int(np.prod([(size + 1) // 2 for size in dimension_size])),
                 self.hidden_dim,
             ),
         )

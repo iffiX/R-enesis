@@ -2,9 +2,9 @@ import ray
 import numpy as np
 from ray import tune
 from ray.tune.logger import TBXLoggerCallback
-from experiments.gmm_ws_voxcraft_observe_seq_rl_pretrain.model import CustomPPO
-from experiments.gmm_ws_voxcraft_observe_seq_rl_pretrain.utils import DataLoggerCallback
-from experiments.gmm_ws_voxcraft_observe_seq_rl_pretrain.config import (
+from experiments.vec_patch_voxcraft.model import CustomPPO
+from experiments.vec_patch_voxcraft.utils import DataLoggerCallback
+from experiments.vec_patch_voxcraft.config import (
     config,
     iters,
 )

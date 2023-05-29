@@ -16,6 +16,7 @@ INCLUDE = [
     "init.sh",
     "install.sh",
     "launch_config.json",
+    "LAUNCH_COMMAND.sh",
     "main.py",
     "README.md",
     "requirements.txt",

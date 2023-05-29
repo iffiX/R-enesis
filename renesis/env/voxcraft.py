@@ -23,9 +23,9 @@ from renesis.env_model.gmm import (
     normalize,
     time_observe_wrapper,
 )
-from renesis.env_model.patch import PatchModel
+from renesis.env_model.patch import PatchModel, PatchSphereModel
 from renesis.env_model.growth import GrowthModel
-from renesis.utils.metrics import get_surface_area, get_volume
+from renesis.utils.metrics import get_surface_area, get_volume, get_bounding_box_sizes
 
 
 class VoxcraftBaseEnvironment(VectorEnv):
@@ -418,25 +418,30 @@ class VoxcraftSingleRewardBaseEnvironment(VectorEnv):
         for idx, (model, before_finished, evaluate) in enumerate(
             zip(self.env_models, before_step_all_finished, should_evaluate)
         ):
+            # if not before_finished:
+            #     if model.steps == 1:
+            #         reward_signals[idx] = 1
+            #     else:
+            #         patch_pos = [
+            #             np.ceil(model.scale(patch)[:3] - model.patch_size / 2)
+            #             for patch in model.patches
+            #         ]
+            #         diffs = [patch_pos[-1] - p for p in patch_pos[:-1]]
+            #         dist = np.min([np.linalg.norm(diff) for diff in diffs])
+            #         if dist < model.patch_size:
+            #             reward_signals[idx] = 1
+            #         else:
+            #             diagonal_length = np.sqrt(
+            #                 np.sum(np.array(model.dimension_size) ** 2)
+            #             )
+            #             reward_signals[idx] = 1 - (dist - model.patch_size) / (
+            #                 diagonal_length - model.patch_size
+            #             )
+            # if evaluate:
+            #     reward_signals[idx] += self.end_rewards[idx]
+
             if not before_finished:
-                if model.steps == 1:
-                    reward_signals[idx] = 1
-                else:
-                    patch_pos = [
-                        np.ceil(model.scale(patch)[:3] - model.patch_size / 2)
-                        for patch in model.patches
-                    ]
-                    diffs = [patch_pos[-1] - p for p in patch_pos[:-1]]
-                    dist = np.min([np.linalg.norm(diff) for diff in diffs])
-                    if dist < model.patch_size:
-                        reward_signals[idx] = 1
-                    else:
-                        diagonal_length = np.sqrt(
-                            np.sum(np.array(model.dimension_size) ** 2)
-                        )
-                        reward_signals[idx] = 1 - (dist - model.patch_size) / (
-                            diagonal_length - model.patch_size
-                        )
+                reward_signals[idx] = 0
             if evaluate:
                 reward_signals[idx] += self.end_rewards[idx]
 
@@ -494,7 +499,7 @@ class VoxcraftSingleRewardBaseEnvironment(VectorEnv):
             reward = self.compute_reward_from_sim_result(
                 initial_positions,
                 final_positions,
-                model.get_robot_voxels(),
+                model,
             )
             self.end_rewards[idx] = reward
             self.end_robots[idx] = robot
@@ -542,9 +547,7 @@ class VoxcraftSingleRewardBaseEnvironment(VectorEnv):
                 )
                 return robots, out
 
-    def compute_reward_from_sim_result(
-        self, initial_positions, final_positions, robot_voxels
-    ):
+    def compute_reward_from_sim_result(self, initial_positions, final_positions, model):
         """
         Note: Reward should always have an initial value of 0 for empty robots.
         """
@@ -563,10 +566,13 @@ class VoxcraftSingleRewardBaseEnvironment(VectorEnv):
             if reward < 1e-3:
                 reward = 0
         elif self.reward_type == "distance_traveled_efficiency":
-            reward = distance_traveled(initial_positions, final_positions) * (
-                np.sum(robot_voxels == 1) / np.sum(robot_voxels != 0)
+            robot_voxels = model.get_robot_voxels()
+            sizes, *_ = model.get_robot()
+            reward = 10 * (
+                distance_traveled(initial_positions, final_positions) / max(sizes)
+                + (np.sum(robot_voxels == 1) / np.sum(robot_voxels != 0))
             )
-            print(f"ratio:{np.sum(robot_voxels == 1) / np.sum(robot_voxels != 0)}")
+            # print(f"ratio:{np.sum(robot_voxels == 1) / np.sum(robot_voxels != 0)}")
             if reward < 1e-3:
                 reward = 0
         else:
@@ -703,6 +709,30 @@ class VoxcraftSingleRewardPatchEnvironment(VoxcraftSingleRewardBaseEnvironment):
         )
 
 
+class VoxcraftSingleRewardPatchSphereEnvironment(VoxcraftSingleRewardBaseEnvironment):
+    def __init__(self, config):
+        if config.get("debug", False):
+            enable_debugger(
+                config.get("debug_ip", "localhost"), config.get("debug_port", 8223)
+            )
+        env_models = [
+            PatchSphereModel(
+                materials=config["materials"],
+                dimension_size=config["dimension_size"],
+                patch_size=config["patch_size"],
+                max_patch_num=config["max_patch_num"],
+            )
+            for _ in range(config["num_envs"])
+        ]
+        super().__init__(config, env_models)
+
+    def vector_step(self, actions):
+        normalize_mode = self.config.get("normalize_mode", "clip")
+        return super().vector_step(
+            [normalize(action, mode=normalize_mode) for action in actions]
+        )
+
+
 class VoxcraftSingleRewardTestBaseEnvironment(VectorEnv):
     metadata = {"render.modes": ["ansi"]}
 
@@ -750,8 +780,6 @@ class VoxcraftSingleRewardTestBaseEnvironment(VectorEnv):
 
     @override(VectorEnv)
     def vector_step(self, actions):
-        # if len(self.env_models) == 1:
-        #     print(actions)
         before_step_all_finished = self.check_finished()
         for model, action, before_finished in zip(
             self.env_models, actions, before_step_all_finished
@@ -772,49 +800,29 @@ class VoxcraftSingleRewardTestBaseEnvironment(VectorEnv):
             zip(self.env_models, before_step_all_finished, should_evaluate)
         ):
             if not before_finished:
-                # if model.is_robot_invalid():
-                #     reward_signals[idx] = 0
+                # if model.steps == 1:
+                #     reward_signals[idx] = 1
                 # else:
-                #     reward_signals[idx] = (
-                #         1 if np.any(model.prev_voxels != model.voxels) else 0.1
-                #     )
-                if model.steps == 1:
-                    reward_signals[idx] = 1
-                else:
-                    # diffs = [model.patches[-1] - p for p in model.patches[:-1]]
-                    # dist = np.min(
-                    #     [
-                    #         np.linalg.norm(
-                    #             diff[:3],
-                    #         )
-                    #         * model.dimension_size
-                    #         for diff in diffs
-                    #     ]
-                    # )
-                    # if dist < model.patch_size:
-                    #     reward_signals[idx] = 1
-                    # else:
-                    #     reward_signals[idx] = 1 - (dist - model.patch_size) / (
-                    #         model.dimension_size * np.sqrt(3) - model.patch_size
-                    #     )
-                    patch_pos = [
-                        np.ceil(model.scale(patch)[:3] - model.patch_size / 2)
-                        for patch in model.patches
-                    ]
-                    diffs = [patch_pos[-1] - p for p in patch_pos[:-1]]
-                    dist = np.min([np.linalg.norm(diff) for diff in diffs])
-                    if dist < model.patch_size:
-                        reward_signals[idx] = 1
-                    else:
-                        reward_signals[idx] = 1 - (dist - model.patch_size) / (
-                            model.dimension_size * np.sqrt(3) - model.patch_size
-                        )
+                #     patch_pos = [
+                #         np.ceil(model.scale(patch)[:3] - model.patch_size / 2)
+                #         for patch in model.patches
+                #     ]
+                #     diffs = [patch_pos[-1] - p for p in patch_pos[:-1]]
+                #     dist = np.min([np.linalg.norm(diff) for diff in diffs])
+                #     if dist < model.patch_size:
+                #         reward_signals[idx] = 1
+                #     else:
+                #         diagonal_length = np.sqrt(
+                #             np.sum(np.array(model.dimension_size) ** 2)
+                #         )
+                #         reward_signals[idx] = 1 - (dist - model.patch_size) / (
+                #             diagonal_length - model.patch_size
+                #         )
+                reward_signals[idx] = 0
             if evaluate:
                 reward_signals[idx] += self.end_rewards[idx]
 
-        # if len(self.env_models) == 1:
-        # print(actions)
-        print([f"{r:.3f}" for r in reward_signals])
+        # print([f"{r:.3f}" for r in reward_signals])
         return (
             [model.observe() for model in self.env_models],
             reward_signals,
@@ -857,15 +865,22 @@ class VoxcraftSingleRewardTestBaseEnvironment(VectorEnv):
             self.empty_record = []
 
         for model, idx in zip(valid_models, valid_model_indices):
-            # sizes, representation = model.get_robot()
-            # self.end_rewards[idx] = sizes[2]
-            # self.end_rewards[idx] = np.sum(
-            #     np.array([np.sum(layer != 0) for layer in representation])
-            # )
-            voxels = model.get_largest_connected_component_voxels()
-            self.end_rewards[idx] = get_volume(voxels) * 20 / get_surface_area(voxels)
+            self.end_rewards[idx] = self.compute_reward_from_robot_voxels(
+                model.get_robot_voxels()
+            )
             self.end_robots[idx] = ""
             self.end_state_data[idx] = model.get_state_data()
+
+    def compute_reward_from_robot_voxels(self, voxels):
+        if self.reward_type == "height":
+            reward = get_bounding_box_sizes(voxels)[2]
+        elif self.reward_type == "volume":
+            reward = get_volume(voxels) / 10
+        else:
+            raise Exception("Unknown reward type: {self.reward_type}")
+        if np.isnan(reward):
+            reward = 0
+        return reward
 
     def check_finished(self):
         return [
@@ -919,6 +934,32 @@ class VoxcraftSingleRewardTestPatchEnvironment(VoxcraftSingleRewardTestBaseEnvir
             )
         env_models = [
             PatchModel(
+                materials=config["materials"],
+                dimension_size=config["dimension_size"],
+                patch_size=config["patch_size"],
+                max_patch_num=config["max_patch_num"],
+            )
+            for _ in range(config["num_envs"])
+        ]
+        super().__init__(config, env_models)
+
+    def vector_step(self, actions):
+        normalize_mode = self.config.get("normalize_mode", "clip")
+        return super().vector_step(
+            [normalize(action, mode=normalize_mode) for action in actions]
+        )
+
+
+class VoxcraftSingleRewardTestPatchSphereEnvironment(
+    VoxcraftSingleRewardTestBaseEnvironment
+):
+    def __init__(self, config):
+        if config.get("debug", False):
+            enable_debugger(
+                config.get("debug_ip", "localhost"), config.get("debug_port", 8223)
+            )
+        env_models = [
+            PatchSphereModel(
                 materials=config["materials"],
                 dimension_size=config["dimension_size"],
                 patch_size=config["patch_size"],

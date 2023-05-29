@@ -7,7 +7,7 @@ from ray.tune.logger import LoggerCallback
 from ray.tune.result import TIMESTEPS_TOTAL, TRAINING_ITERATION
 from ray.rllib.algorithms.callbacks import DefaultCallbacks
 from renesis.env.voxcraft import (
-    VoxcraftSingleRewardPatchSphereEnvironment,
+    VoxcraftSingleRewardTestPatchSphereEnvironment,
 )
 from renesis.env_model.patch import PatchModel
 from renesis.utils.metrics import (
@@ -17,33 +17,10 @@ from renesis.utils.metrics import (
     get_section_num,
     get_reflection_symmetry,
 )
-from renesis.utils.media import create_video_subproc
 from renesis.utils.debug import enable_debugger
-from renesis.sim import Voxcraft, VXHistoryRenderer
 from launch.snapshot import get_snapshot
 
 t.set_printoptions(threshold=10000)
-
-
-def render(history):
-    try:
-        renderer = VXHistoryRenderer(history=history, width=640, height=480)
-        renderer.render()
-        frames = renderer.get_frames()
-        if frames.ndim == 4:
-            print("History saved")
-            return frames
-        else:
-            print("Rendering finished, but no frames produced")
-            print("History:")
-            print(history)
-            return None
-    except Exception as e:
-        print(e)
-        print("Exception occurred, no frames produced")
-        print("History:")
-        print(history)
-        return None
 
 
 class CustomCallbacks(DefaultCallbacks):
@@ -92,7 +69,9 @@ class CustomCallbacks(DefaultCallbacks):
                 "after episode is done!"
             )
 
-        env = base_env.vector_env  # type: VoxcraftSingleRewardPatchSphereEnvironment
+        env = (
+            base_env.vector_env
+        )  # type: VoxcraftSingleRewardTestPatchSphereEnvironment
         episode.media["episode_data"]["steps"] = np.stack(
             episode.media["episode_data"]["steps"]
         )
@@ -258,55 +237,5 @@ class DataLoggerCallback(LoggerCallback):
                 "wb",
             ) as file:
                 pickle.dump(raw_data, file)
-
-            simulator = Voxcraft()
-
-            robot = data["best_robot"]
-            path = os.path.join(
-                self._trial_local_dir[trial],
-                f"robot_it_{iteration}_rew_{data['best_reward']}.vxd",
-            )
-            with open(path, "w") as file:
-                print(f"Saving robot to {path}")
-                file.write(robot)
-
-            _, (sim_history,) = simulator.run_sims([self.base_config], [robot])
-            path = os.path.join(
-                self._trial_local_dir[trial],
-                f"run_it_{iteration}_rew_{data['best_reward']}.history",
-            )
-            with open(path, "w") as file:
-                print(f"Saving history to {path}")
-                file.write(sim_history)
-
-            # frames = render(sim_history)
-            #
-            # if frames is not None:
-            #     path = os.path.join(
-            #         self._trial_local_dir[trial],
-            #         f"rendered_it_{iteration}_rew_{data['best_reward']}.gif",
-            #     )
-            #     print(f"Saving rendered results to {path}")
-            #     wait = create_video_subproc(
-            #         [f for f in frames],
-            #         path=self._trial_local_dir[trial],
-            #         filename=f"rendered_it_{iteration}",
-            #         extension=".gif",
-            #     )
-            #     path = os.path.join(
-            #         self._trial_local_dir[trial],
-            #         f"robot_it_{iteration}_rew_{data['best_reward']}.vxd",
-            #     )
-            #     with open(path, "w") as file:
-            #         print(f"Saving robot to {path}")
-            #         file.write(robot)
-            #     path = os.path.join(
-            #         self._trial_local_dir[trial],
-            #         f"run_it_{iteration}_rew_{data['best_reward']}.history",
-            #     )
-            #     with open(path, "w") as file:
-            #         print(f"Saving history to {path}")
-            #         file.write(sim_history)
-            #     wait()
 
         print("Saving completed")

@@ -6,16 +6,28 @@
 	<Simulator>
 		<EnableExpansion>1</EnableExpansion>
         <Integration>
-            <DtFrac>1</DtFrac>
+            <DtFrac>2</DtFrac>
         </Integration>
-		<StopCondition>
-			<StopConditionFormula>
+		<Condition>
+			<StopCondition>
+				<mtSUB>
+				<mtVAR>t</mtVAR>
+				<mtCONST>10</mtCONST>
+				</mtSUB>
+			</StopCondition>
+			<ResultStartCondition>
 				<mtSUB>
 				<mtVAR>t</mtVAR>
 				<mtCONST>5</mtCONST>
 				</mtSUB>
-			</StopConditionFormula>
-		</StopCondition>
+			</ResultStartCondition>
+			<ResultEndCondition>
+				<mtSUB>
+				<mtVAR>t</mtVAR>
+				<mtCONST>10</mtCONST>
+				</mtSUB>
+			</ResultEndCondition>
+		</Condition>
         <SavePositionOfAllVoxels>1</SavePositionOfAllVoxels>
 	    <Damping>
             <BondDampingZ>1</BondDampingZ>
@@ -26,7 +38,7 @@
 	<Environment>
         <Thermal>
             <TempEnabled>1</TempEnabled>
-            <TempAmplitude>20</TempAmplitude>
+            <TempAmplitude>10</TempAmplitude>
             <VaryTempEnabled>1</VaryTempEnabled>
             <TempPeriod>.25</TempPeriod>
         </Thermal>
@@ -51,7 +63,7 @@
             </Display>
             <Mechanical>
                 <MatModel>0</MatModel><!--0 = no failing-->
-                <Elastic_Mod>1e5</Elastic_Mod>
+                <Elastic_Mod>1e7</Elastic_Mod>
                 <Fail_Stress>0</Fail_Stress>
                 <Density>1500</Density>
                 <Poissons_Ratio>0.35</Poissons_Ratio>
@@ -71,7 +83,7 @@
             </Display>
             <Mechanical>
                 <MatModel>0</MatModel><!--0 = no failing-->
-                <Elastic_Mod>1e5</Elastic_Mod>
+                <Elastic_Mod>1e7</Elastic_Mod>
                 <Fail_Stress>0</Fail_Stress>
                 <Density>1500</Density>
                 <Poissons_Ratio>0.35</Poissons_Ratio>
@@ -91,7 +103,7 @@
             </Display>
             <Mechanical>
                 <MatModel>0</MatModel><!--0 = no failing-->
-                <Elastic_Mod>1e5</Elastic_Mod>
+                <Elastic_Mod>1e7</Elastic_Mod>
                 <Fail_Stress>0</Fail_Stress>
                 <Density>1500</Density>
                 <Poissons_Ratio>0.35</Poissons_Ratio>

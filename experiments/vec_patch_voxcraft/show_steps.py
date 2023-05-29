@@ -1,12 +1,12 @@
 import ray
 import numpy as np
 from PIL import Image
-from experiments.patch_sphere_voxcraft.model import CustomPPO
+from experiments.patch_voxcraft.model import CustomPPO
 from renesis.env.voxcraft import (
     VoxcraftSingleRewardTestPatchEnvironment,
     normalize,
 )
-from experiments.patch_sphere_voxcraft.config import (
+from experiments.patch_voxcraft.config import (
     config,
     dimension_size,
     steps,

@@ -3,7 +3,8 @@ import numpy as np
 from typing import List
 from gym.spaces import Box
 from .base import BaseModel
-from .gmm import normalize, is_voxel_continuous
+from .gmm import is_voxel_continuous, normalize
+from renesis.utils.robot import get_robot_voxels_from_voxels
 
 
 class PatchModel(BaseModel):
@@ -190,14 +191,66 @@ class PatchModel(BaseModel):
             ] = material
 
         self.occupied = self.voxels != 0
-
-        labels, label_num = cc3d.connected_components(
-            self.occupied, connectivity=6, return_N=True, out_dtype=np.uint32
+        self.robot_voxels, self.robot_occupied = get_robot_voxels_from_voxels(
+            self.voxels, self.occupied
         )
-        count = np.bincount(labels.reshape(-1), minlength=label_num)
-        # Ignore label 0, which is non-occupied space
-        count[0] = 0
-        largest_connected_component = labels == np.argmax(count)
-        self.robot_voxels = np.where(largest_connected_component, self.voxels, 0)
-        self.robot_occupied = self.robot_voxels != 0
+        self.is_robot_valid = np.any(self.robot_occupied)
+
+
+class PatchSphereModel(PatchModel):
+    def update_voxels(self):
+        # generate coordinates
+        # Eg: if dimension size is 20, indices are [-10, ..., 9]
+        # if dimension size if 21, indices are [-10, ..., 10]
+        indices = [
+            list(
+                range(
+                    -offset,
+                    size - offset,
+                )
+            )
+            for size, offset in zip(self.dimension_size, self.center_voxel_offset)
+        ]
+        coords = np.stack(np.meshgrid(*indices, indexing="ij"))
+        # coords shape [coord_num, 3]
+        coords = np.transpose(coords.reshape([coords.shape[0], -1]))
+        all_values = []
+        patch_radius = (self.patch_size - 1) / 2 + 1e-3
+        for idx, patch in enumerate(self.patches):
+            patch = self.scale(patch)
+            patch_center = np.round(patch[:3])
+            covered = np.linalg.norm(coords - patch_center, axis=-1) <= patch_radius
+            # later added patches has a higher weight,
+            # so previous patches will be overwritten
+            # Add 1 so that the first patch is not zero
+            # because idx starts from 0
+            all_values.append(covered * (idx + 1))
+
+        self.voxels = np.zeros(
+            self.dimension_size,
+            dtype=np.float32,
+        )
+
+        if self.patches:
+            # all_values shape [coord_num, patch_num]
+            all_values = np.stack(all_values, axis=1)
+            material_map = np.array(
+                [self.materials[int(np.argmax(patch[3:]))] for patch in self.patches]
+            )
+            material = np.where(
+                np.any(all_values > 0, axis=1),
+                material_map[np.argmax(all_values, axis=1)],
+                0,
+            )
+
+            self.voxels[
+                coords[:, 0] + self.center_voxel_offset[0],
+                coords[:, 1] + self.center_voxel_offset[1],
+                coords[:, 2] + self.center_voxel_offset[2],
+            ] = material
+
+        self.occupied = self.voxels != 0
+        self.robot_voxels, self.robot_occupied = get_robot_voxels_from_voxels(
+            self.voxels, self.occupied
+        )
         self.is_robot_valid = np.any(self.robot_occupied)

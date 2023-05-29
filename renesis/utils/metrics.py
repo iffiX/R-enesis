@@ -4,26 +4,26 @@ from scipy.spatial import ConvexHull
 from renesis.utils.plotter import Plotter
 
 
-def max_z(final_positions):
-    _, max_z = get_min_max_z(final_positions)
+def max_z(end_positions):
+    _, max_z = get_min_max_z(end_positions)
     return max_z
 
 
-def table(initial_positions):
-    _, max_z = get_min_max_z(initial_positions)
-    num_at_z, num_not_at_z = get_num_at_z(initial_positions, max_z)
+def table(start_positions):
+    _, max_z = get_min_max_z(start_positions)
+    num_at_z, num_not_at_z = get_num_at_z(start_positions, max_z)
     # Account for 0 being height with one voxel.
     height = max_z + 1
     surface = num_at_z
     excess = num_not_at_z or 1
-    stability = get_stability(initial_positions, max_z) or 1
+    stability = get_stability(start_positions, max_z) or 1
     return height * surface * (stability / excess)
 
 
-def get_min_max_z(final_positions):
+def get_min_max_z(end_positions):
     max_z = -np.inf
     min_z = np.inf
-    for p in final_positions:
+    for p in end_positions:
         if p[2] > max_z:
             max_z = p[2]
         if p[2] < min_z:
@@ -51,6 +51,20 @@ def prepare_points_for_convex_hull(x):
         q.add((p[0] + 1, p[1] + 1))
     x = list(q)
     return x
+
+
+def get_bounding_box_sizes(X):
+    occupied = X != 0
+    x_occupied = [x for x in range(occupied.shape[0]) if np.any(occupied[x])]
+    y_occupied = [y for y in range(occupied.shape[1]) if np.any(occupied[:, y])]
+    z_occupied = [z for z in range(occupied.shape[2]) if np.any(occupied[:, :, z])]
+    min_x = min(x_occupied)
+    max_x = max(x_occupied) + 1
+    min_y = min(y_occupied)
+    max_y = max(y_occupied) + 1
+    min_z = min(z_occupied)
+    max_z = max(z_occupied) + 1
+    return max_x - min_x, max_y - min_y, max_z - min_z
 
 
 def get_convex_hull_area(x):
@@ -103,18 +117,16 @@ def get_stability(x, max_z):
     return stability
 
 
-def has_fallen(initial_positions, final_positions, threshold=0.25):
+def has_fallen(start_positions, end_positions, threshold=0.25):
     # ! Incorrect
-    Z_initial = np.array(initial_positions)[:, :2]
-    Z_final = np.array(final_positions)[:, :2]
+    Z_initial = np.array(start_positions)[:, :2]
+    Z_final = np.array(end_positions)[:, :2]
     difference = np.abs(Z_final - Z_initial)
     return np.any(difference >= threshold)
 
 
-def distance_traveled(initial_positions, final_positions):
-    XY_initial = np.array(initial_positions)[:, :2]
-    XY_final = np.array(final_positions)[:, :2]
-    return np.linalg.norm(XY_final - XY_initial, axis=1).max()
+def distance_traveled(start_com, end_com):
+    return np.linalg.norm(end_com - start_com).mean()
 
 
 def max_volume(X):

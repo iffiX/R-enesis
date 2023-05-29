@@ -1,21 +1,21 @@
-from renesis.env.voxcraft import (
-    VoxcraftSingleRewardPatchSphereEnvironment,
+from renesis.env.vec_voxcraft import (
+    VoxcraftSingleRewardVectorizedPatchEnvironment,
 )
-from experiments.patch_sphere_voxcraft.utils import *
+from experiments.vec_patch_voxcraft.utils import *
 
-dimension_size = (10, 10, 10)
+dimension_size = (7, 7, 7)
 materials = (0, 1, 2, 3)
-iters = 3000
-steps = 40
+iters = 2000
+steps = 100
 
 
 workers = 1
 envs = 128
 rollout = 1
-patch_size = 3
+patch_size = 1
 
 config = {
-    "env": VoxcraftSingleRewardPatchSphereEnvironment,
+    "env": VoxcraftSingleRewardVectorizedPatchEnvironment,
     "env_config": {
         "debug": False,
         "dimension_size": dimension_size,
@@ -49,37 +49,7 @@ config = {
     "placement_strategy": "SPREAD",
     "num_cpus_per_worker": 1,
     "framework": "torch",
-    # Set up a separate evaluation worker set for the
-    # `algo.evaluate()` call after training (see below).
     "evaluation_interval": None,
-    # "evaluation_interval": 1,
-    # "evaluation_duration": envs,
-    # "evaluation_duration_unit": "episodes",
-    # "evaluation_parallel_to_training": False,
-    # "evaluation_num_workers": 0,
-    # "evaluation_config": {
-    #     "render_env": False,
-    #     "explore": True,
-    #     "env_config": {
-    #         "debug": False,
-    #         "dimension_size": dimension_size,
-    #         "materials": materials,
-    #         "max_patch_num": steps,
-    #         "patch_size": patch_size,
-    #         "max_steps": steps,
-    #         "reward_type": "distance_traveled",
-    #         "base_config_path": str(
-    #             os.path.join(
-    #                 os.path.dirname(os.path.abspath(__file__)), "data", "base.vxa"
-    #             )
-    #         ),
-    #         "voxel_size": 0.01,
-    #         "normalize_mode": "clip",
-    #         "fallen_threshold": 0.25,
-    #         "num_envs": envs,
-    #     },
-    #     "num_envs_per_worker": 1,
-    # },
     "model": {
         "custom_model": "actor_model",
         "max_seq_len": steps,
@@ -89,7 +59,7 @@ config = {
             "dimension_size": dimension_size,
             "materials": materials,
             "normalize_mode": "clip",
-            "initial_std_bias_in_voxels": max(max(dimension_size) // 10, 2),
+            "initial_std_bias_in_voxels": 0,
         },
     },
     "callbacks": CustomCallbacks,

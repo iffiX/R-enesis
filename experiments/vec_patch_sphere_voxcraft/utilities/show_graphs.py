@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 from matplotlib.figure import Figure
 from matplotlib.axes import Axes
 
-from experiments.patch_sphere_voxcraft.config import dimension_size
+from experiments.patch_voxcraft.config import dimension_size
 from renesis.env_model.patch import normalize
 
 np.set_printoptions(precision=4, threshold=10000, suppress=True)

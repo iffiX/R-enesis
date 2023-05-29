@@ -5,8 +5,8 @@ from experiments.patch_voxcraft.utils import *
 
 dimension_size = (20, 20, 8)
 materials = (0, 1, 2, 3)
-iters = 4000
-steps = 20
+iters = 3000
+steps = 40
 
 
 workers = 1
@@ -89,7 +89,7 @@ config = {
             "dimension_size": dimension_size,
             "materials": materials,
             "normalize_mode": "clip",
-            "initial_std_bias_in_voxels": max(max(dimension_size) // 10, 2),
+            "initial_std_bias_in_voxels": 0,
         },
     },
     "callbacks": CustomCallbacks,

@@ -37,21 +37,25 @@ class Actor(TorchModelV2, nn.Module):
         self.max_steps = max_steps
         self.dimension_size = dimension_size
         self.materials = materials
-        self.initial_std_bias_in_voxels = initial_std_bias_in_voxels
-        if normalize_mode == "clip":
-            self.initial_std_bias = [
-                np.log(initial_std_bias_in_voxels / (size * 3) * 4)
-                for size in dimension_size
-            ]
-        elif normalize_mode == "clip1":
-            self.initial_std_bias = [
-                np.log(initial_std_bias_in_voxels / (size * 3) * 2)
-                for size in dimension_size
-            ]
+        if initial_std_bias_in_voxels is not None and initial_std_bias_in_voxels > 0:
+            self.initial_std_bias_in_voxels = initial_std_bias_in_voxels
+            if normalize_mode == "clip":
+                self.initial_std_bias = [
+                    np.log(initial_std_bias_in_voxels / (size * 3) * 4)
+                    for size in dimension_size
+                ]
+            elif normalize_mode == "clip1":
+                self.initial_std_bias = [
+                    np.log(initial_std_bias_in_voxels / (size * 3) * 2)
+                    for size in dimension_size
+                ]
+            else:
+                print(
+                    f"Initial std bias not supported for normalize mode {normalize_mode}, use 0 by default"
+                )
+                self.initial_std_bias = [0, 0, 0]
         else:
-            print(
-                f"Initial std bias not supported for normalize mode {normalize_mode}, use 0 by default"
-            )
+            self.initial_std_bias_in_voxels = 0
             self.initial_std_bias = [0, 0, 0]
 
         self.input_layer = nn.Sequential(

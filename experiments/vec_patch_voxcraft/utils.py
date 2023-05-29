@@ -6,10 +6,6 @@ import torch as t
 from ray.tune.logger import LoggerCallback
 from ray.tune.result import TIMESTEPS_TOTAL, TRAINING_ITERATION
 from ray.rllib.algorithms.callbacks import DefaultCallbacks
-from renesis.env.voxcraft import (
-    VoxcraftSingleRewardPatchSphereEnvironment,
-)
-from renesis.env_model.patch import PatchModel
 from renesis.utils.metrics import (
     get_volume,
     get_surface_area,
@@ -92,18 +88,21 @@ class CustomCallbacks(DefaultCallbacks):
                 "after episode is done!"
             )
 
-        env = base_env.vector_env  # type: VoxcraftSingleRewardPatchSphereEnvironment
+        env = base_env.vector_env
         episode.media["episode_data"]["steps"] = np.stack(
             episode.media["episode_data"]["steps"]
         )
         episode.media["episode_data"]["reward"] = env.end_rewards[env_index]
         episode.media["episode_data"]["robot"] = env.end_robots[env_index]
-        episode.media["episode_data"]["patches"] = env.end_state_data[env_index][0]
-        episode.media["episode_data"]["voxels"] = env.end_state_data[env_index][
-            1
+        episode.media["episode_data"]["record"] = env.end_records[env_index]
+        episode.media["episode_data"]["patches"] = np.array(
+            env.vec_env_model.vec_patches
+        )[:, env_index]
+        episode.media["episode_data"]["voxels"] = env.vec_env_model.vec_voxels[
+            env_index
         ].astype(np.int8)
         episode.custom_metrics["real_reward"] = env.end_rewards[env_index]
-        metrics = self.get_robot_metric(env.env_models[env_index])
+        metrics = self.get_robot_metric(env.vec_env_model.vec_voxels[env_index])
         episode.custom_metrics.update(metrics)
 
     def on_train_result(
@@ -114,36 +113,6 @@ class CustomCallbacks(DefaultCallbacks):
         trainer,
         **kwargs,
     ) -> None:
-        # # Remove non-evaluation data
-        # result["episode_media"] = {}
-        # # print("Custom metrics:")
-        # # print(result["custom_metrics"])
-        # if "sampler_results" in result:
-        #     result["sampler_results"]["episode_media"] = {}
-        #
-        # if "evaluation" in result:
-        #     data = result["evaluation"]["episode_media"].get("episode_data", [])
-        #
-        #     if len(data) > 0:
-        #         # Aggregate results
-        #         rewards = []
-        #         best_reward = -np.inf
-        #         best_robot = None
-        #         for episode_data in data:
-        #             rewards.append(episode_data["reward"])
-        #             if episode_data["reward"] > best_reward:
-        #                 best_reward = episode_data["reward"]
-        #                 best_robot = episode_data["robot"]
-        #
-        #         result["evaluation"]["episode_media"] = {
-        #             "raw_data": data,
-        #             "episode_data": {
-        #                 "rewards": rewards,
-        #                 "best_reward": best_reward,
-        #                 "best_robot": best_robot,
-        #             },
-        #         }
-
         # Use sampled data from training instead of evaluation to speed up
         # Note that the first epoch of data, the model is untrained, while for
         # evaluation, since it is performed after training PPO, the model is
@@ -158,11 +127,14 @@ class CustomCallbacks(DefaultCallbacks):
         rewards = []
         best_reward = -np.inf
         best_robot = None
+        best_record = None
         for episode_data in data:
             rewards.append(episode_data["reward"])
             if episode_data["reward"] > best_reward:
                 best_reward = episode_data["reward"]
                 best_robot = episode_data["robot"]
+                best_record = episode_data["record"]
+            del episode_data["record"]
 
         result["episode_media"] = {
             "raw_data": data,
@@ -170,11 +142,11 @@ class CustomCallbacks(DefaultCallbacks):
                 "rewards": rewards,
                 "best_reward": best_reward,
                 "best_robot": best_robot,
+                "best_record": best_record,
             },
         }
 
-    def get_robot_metric(self, env_model: PatchModel):
-        voxels = env_model.get_voxels()
+    def get_robot_metric(self, voxels):
         metrics = {}
         metrics["volume"] = get_volume(voxels)
         metrics["surface_area"] = get_surface_area(voxels)
@@ -259,8 +231,6 @@ class DataLoggerCallback(LoggerCallback):
             ) as file:
                 pickle.dump(raw_data, file)
 
-            simulator = Voxcraft()
-
             robot = data["best_robot"]
             path = os.path.join(
                 self._trial_local_dir[trial],
@@ -270,43 +240,13 @@ class DataLoggerCallback(LoggerCallback):
                 print(f"Saving robot to {path}")
                 file.write(robot)
 
-            _, (sim_history,) = simulator.run_sims([self.base_config], [robot])
+            record = data["best_record"]
             path = os.path.join(
                 self._trial_local_dir[trial],
                 f"run_it_{iteration}_rew_{data['best_reward']}.history",
             )
             with open(path, "w") as file:
                 print(f"Saving history to {path}")
-                file.write(sim_history)
-
-            # frames = render(sim_history)
-            #
-            # if frames is not None:
-            #     path = os.path.join(
-            #         self._trial_local_dir[trial],
-            #         f"rendered_it_{iteration}_rew_{data['best_reward']}.gif",
-            #     )
-            #     print(f"Saving rendered results to {path}")
-            #     wait = create_video_subproc(
-            #         [f for f in frames],
-            #         path=self._trial_local_dir[trial],
-            #         filename=f"rendered_it_{iteration}",
-            #         extension=".gif",
-            #     )
-            #     path = os.path.join(
-            #         self._trial_local_dir[trial],
-            #         f"robot_it_{iteration}_rew_{data['best_reward']}.vxd",
-            #     )
-            #     with open(path, "w") as file:
-            #         print(f"Saving robot to {path}")
-            #         file.write(robot)
-            #     path = os.path.join(
-            #         self._trial_local_dir[trial],
-            #         f"run_it_{iteration}_rew_{data['best_reward']}.history",
-            #     )
-            #     with open(path, "w") as file:
-            #         print(f"Saving history to {path}")
-            #         file.write(sim_history)
-            #     wait()
+                file.write(record)
 
         print("Saving completed")
