@@ -41,15 +41,15 @@ def vxd_creator(
         etree.SubElement(Data, "Layer").text = etree.CDATA(material_data)
 
         if representation[z][1] is not None:
-            amplitude_data = "".join(np.char.mod("%f", representation[z][1]))
+            amplitude_data = ", ".join(np.char.mod("%f", representation[z][1]))
             etree.SubElement(amplitudes, "Layer").text = etree.CDATA(amplitude_data)
 
         if representation[z][2] is not None:
-            frequency_data = "".join(np.char.mod("%f", representation[z][2]))
+            frequency_data = ", ".join(np.char.mod("%f", representation[z][2]))
             etree.SubElement(frequencies, "Layer").text = etree.CDATA(frequency_data)
 
         if representation[z][3] is not None:
-            phase_offset_data = "".join(np.char.mod("%d", representation[z][3]))
+            phase_offset_data = ", ".join(np.char.mod("%f", representation[z][3]))
             etree.SubElement(phase_offsets, "Layer").text = etree.CDATA(
                 phase_offset_data
             )

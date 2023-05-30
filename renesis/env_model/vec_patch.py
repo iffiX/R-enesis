@@ -287,3 +287,66 @@ class VectorizedPatchSphereModel(VectorizedPatchModel):
 
         self.vec_voxels = vec_voxels.cpu().numpy()
         self.vec_occupied = (vec_voxels != 0).cpu().numpy()
+
+
+class VectorizedPatchFixedPhaseOffsetModel(VectorizedPatchModel):
+    def __init__(
+        self,
+        dimension_size=(20, 20, 20),
+        patch_size=1,
+        max_patch_num=100,
+        env_num=100,
+        device=None,
+    ):
+        super(VectorizedPatchFixedPhaseOffsetModel, self).__init__(
+            (0, 1),
+            dimension_size=dimension_size,
+            patch_size=patch_size,
+            max_patch_num=max_patch_num,
+            env_num=env_num,
+            device=device,
+        )
+
+    @staticmethod
+    def get_robots_worker(args):
+        robot_voxels, robot_occupied = get_robot_voxels_from_voxels(*args)
+        # create the 3-D phase offset tensor spanning along the x axis
+        phase_offsets = (
+            np.linspace(0, np.pi, num=robot_voxels.shape[0])[:, np.newaxis, np.newaxis]
+            .repeat(robot_voxels.shape[1], axis=1)
+            .repeat(robot_voxels.shape[2], axis=2)
+        )
+        phase_offsets[~robot_occupied] = 0
+
+        x_occupied = [
+            x for x in range(robot_occupied.shape[0]) if np.any(robot_occupied[x])
+        ]
+        y_occupied = [
+            y for y in range(robot_occupied.shape[1]) if np.any(robot_occupied[:, y])
+        ]
+        z_occupied = [
+            z for z in range(robot_occupied.shape[2]) if np.any(robot_occupied[:, :, z])
+        ]
+        min_x = min(x_occupied)
+        max_x = max(x_occupied) + 1
+        min_y = min(y_occupied)
+        max_y = max(y_occupied) + 1
+        min_z = min(z_occupied)
+        max_z = max(z_occupied) + 1
+        representation = []
+
+        for z in range(min_z, max_z):
+            layer_representation = (
+                robot_voxels[min_x:max_x, min_y:max_y, z]
+                .astype(int)
+                .flatten(order="F")
+                .tolist(),
+                None,
+                None,
+                phase_offsets[min_x:max_x, min_y:max_y, z]
+                .astype(np.float32)
+                .flatten(order="F")
+                .tolist(),
+            )
+            representation.append(layer_representation)
+        return (max_x - min_x, max_y - min_y, max_z - min_z), representation

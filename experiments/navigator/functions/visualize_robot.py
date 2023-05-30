@@ -8,7 +8,7 @@ from renesis.utils.robot import (
     get_robot_voxels_from_voxels,
     get_representation_from_robot_voxels,
 )
-from renesis.utils.voxcraft import vxd_creator, get_voxel_positions
+from renesis.utils.voxcraft import vxd_creator, get_voxel_positions, get_center_of_mass
 from renesis.utils.metrics import distance_traveled
 from renesis.sim import Voxcraft
 from experiments.navigator.trial import TrialRecord
@@ -242,10 +242,8 @@ def visualize_selected_robot(trial_record: TrialRecord, show_epoch: int = -1):
             print(f"Simulation time {end - begin:.3f}")
             file.write(records[0])
 
-            initial_positions, final_positions = get_voxel_positions(
-                results[0], voxel_size=0.01
-            )
-            print(distance_traveled(initial_positions, final_positions))
+            start_com, end_com = get_center_of_mass(results[0], voxel_size=0.01)
+            print(distance_traveled(start_com, end_com))
         command = [
             "voxcraft-viz",
             file.name,

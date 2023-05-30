@@ -175,6 +175,8 @@ class DataLoggerCallback(LoggerCallback):
         shutil.move(snapshot, os.path.join(trial.logdir, "code"))
         self._trial_local_dir[trial] = os.path.join(trial.logdir, "data")
         os.makedirs(self._trial_local_dir[trial], exist_ok=True)
+        with open(os.path.join(trial.logdir, "data", "base.vxa"), "w") as file:
+            file.write(self.base_config)
 
     def log_trial_result(self, iteration, trial, result):
         iteration = result[TRAINING_ITERATION]

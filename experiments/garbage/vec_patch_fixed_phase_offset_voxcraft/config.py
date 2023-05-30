@@ -1,7 +1,7 @@
 from renesis.env.vec_voxcraft import (
-    VoxcraftSingleRewardVectorizedPatchEnvironment,
+    VoxcraftSingleRewardVectorizedPatchFixedPhaseOffsetEnvironment,
 )
-from experiments.vec_patch_voxcraft.utils import *
+from experiments.vec_patch_fixed_phase_offset_voxcraft.utils import *
 
 dimension_size = (7, 7, 7)
 materials = (0, 1, 2, 3)
@@ -15,7 +15,7 @@ rollout = 1
 patch_size = 1
 
 config = {
-    "env": VoxcraftSingleRewardVectorizedPatchEnvironment,
+    "env": VoxcraftSingleRewardVectorizedPatchFixedPhaseOffsetEnvironment,
     "env_config": {
         "debug": False,
         "dimension_size": dimension_size,
@@ -41,7 +41,7 @@ config = {
     "lr": 1e-4,
     "rollout_fragment_length": steps,
     "vf_clip_param": 10**5,
-    "seed": 368179,
+    "seed": 768179,
     "num_workers": workers,
     "num_gpus": 0.1,
     "num_gpus_per_worker": 0.2,

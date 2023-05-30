@@ -15,13 +15,16 @@ from renesis.utils.metrics import (
     max_z,
     table,
     distance_traveled,
-    distance_traveled_com,
     has_fallen,
 )
 from renesis.utils.debug import enable_debugger
 from renesis.env_model.base import BaseVectorizedModel
 from renesis.env_model.gmm import normalize
-from renesis.env_model.vec_patch import VectorizedPatchModel, VectorizedPatchSphereModel
+from renesis.env_model.vec_patch import (
+    VectorizedPatchModel,
+    VectorizedPatchSphereModel,
+    VectorizedPatchFixedPhaseOffsetModel,
+)
 from renesis.utils.metrics import get_surface_area, get_volume, get_bounding_box_sizes
 
 
@@ -245,6 +248,31 @@ class VoxcraftSingleRewardVectorizedPatchSphereEnvironment(
             config,
             VectorizedPatchSphereModel(
                 materials=config["materials"],
+                dimension_size=config["dimension_size"],
+                patch_size=config["patch_size"],
+                max_patch_num=config["max_patch_num"],
+                env_num=config["num_envs"],
+            ),
+        )
+
+    def vector_step(self, actions):
+        normalize_mode = self.config.get("normalize_mode", "clip")
+        return super().vector_step(
+            [normalize(action, mode=normalize_mode) for action in actions]
+        )
+
+
+class VoxcraftSingleRewardVectorizedPatchFixedPhaseOffsetEnvironment(
+    VoxcraftSingleRewardBaseEnvironmentForVecEnvModel
+):
+    def __init__(self, config):
+        if config.get("debug", False):
+            enable_debugger(
+                config.get("debug_ip", "localhost"), config.get("debug_port", 8223)
+            )
+        super().__init__(
+            config,
+            VectorizedPatchFixedPhaseOffsetModel(
                 dimension_size=config["dimension_size"],
                 patch_size=config["patch_size"],
                 max_patch_num=config["max_patch_num"],
