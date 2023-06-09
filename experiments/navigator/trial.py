@@ -19,6 +19,7 @@ class TrialRecord:
         self.trial_dir = trial_dir
         self.comment = self.get_comment()
         self.epoch_files = self.get_epoch_files()  # type: Dict[int, EpochFiles]
+        self.checkpoints = self.get_checkpoints()  # type: List[str]
         self.epochs = sorted(list(self.epoch_files.keys()))
         self.max_reward_epoch, self.max_reward = sorted(
             [(ef.epoch, ef.reward) for ef in self.epoch_files.values()],
@@ -51,6 +52,30 @@ class TrialRecord:
                     if not line.startswith("#"):
                         comment.append(line)
         return comment
+
+    def get_experiment_name(self):
+        path = os.path.join(self.code_dir, "LAUNCH_COMMAND.sh")
+        if os.path.exists(path):
+            with open(path, "r") as file:
+                lines = list(file.readlines())
+                if lines:
+                    start = lines[0].find("experiments/")
+                    if start != -1:
+                        experiment_name = lines[0][start + len("experiments/") :]
+                        experiment_name = experiment_name[: experiment_name.find("/")]
+                        return experiment_name
+        return ""
+
+    def get_checkpoints(self):
+        checkpoints = []
+        for file in os.listdir(self.trial_dir):
+            if file.startswith("checkpoint_") and os.path.isdir(
+                os.path.join(file, self.trial_dir)
+            ):
+                checkpoints.append(file)
+        checkpoints = sorted(checkpoints, key=lambda x: int(x.split("_")[1]))
+        checkpoints = [os.path.join(self.trial_dir, x) for x in checkpoints]
+        return checkpoints
 
     def get_epoch_files(self):
         epoch_files = {}

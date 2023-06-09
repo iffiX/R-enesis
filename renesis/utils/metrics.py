@@ -1,3 +1,4 @@
+import zlib
 import cc3d
 import numpy as np
 from scipy.spatial import ConvexHull
@@ -125,8 +126,16 @@ def has_fallen(start_positions, end_positions, threshold=0.25):
     return np.any(difference >= threshold)
 
 
-def distance_traveled(start_com, end_com):
-    return np.linalg.norm(end_com - start_com).mean()
+def distance_traveled_of_com(start_com, end_com):
+    # start_com and end_com shape: [voxel_num, 3]
+    return np.linalg.norm(end_com[:2] - start_com[:2]).mean()
+
+
+def distance_traveled(start_pos, end_pos):
+    # start_pos and end_pos shape: [voxel_num, 3]
+    return np.linalg.norm(
+        np.array(start_pos)[:, :2] - np.array(end_pos)[:, :2], axis=1
+    ).max()
 
 
 def max_volume(X):
@@ -261,7 +270,17 @@ def get_reflection_symmetry(X):
         symmetric_voxels = np.sum(
             np.logical_and(left_section == flipped_right_section, left_section != 0)
         )
+        # equal to (2 * symmetric_voxels (in half a body)) / (total_voxels)
         symmetric_scores.append(
             2 / (left_voxels / symmetric_voxels + right_voxels / symmetric_voxels)
         )
     return np.mean(symmetric_scores)
+
+
+def get_gzip_compressed_ratio(X: np.ndarray):
+    voxel_bytes = X.astype(np.ubyte).tobytes()
+    return len(zlib.compress(voxel_bytes)) / np.prod(X.shape)
+
+
+def get_passive_material_ratio(X: np.ndarray):
+    return np.sum(X == 1) / get_volume(X)

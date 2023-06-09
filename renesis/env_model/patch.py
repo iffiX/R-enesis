@@ -123,7 +123,7 @@ class PatchModel(BaseModel):
         return np.stack(self.patches), self.voxels
 
     def scale(self, action):
-        min_value = [-offset - 0.5 for offset in self.center_voxel_offset]
+        min_value = [-offset for offset in self.center_voxel_offset]
         return np.array(min_value + [0] * len(self.materials)) + action * np.array(
             self.dimension_size + [1] * len(self.materials)
         )

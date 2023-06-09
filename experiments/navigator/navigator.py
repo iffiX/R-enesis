@@ -13,15 +13,33 @@ from experiments.navigator.prompter import (
     PromptExecutableWithInput,
     PromptExecutableWithMultipleChoice,
 )
-from experiments.navigator.functions.draw_generation_process import (
+from experiments.navigator.functions.single.draw_generation_process import (
     draw_generation_process,
 )
-from experiments.navigator.functions.draw_robots import draw_robots
-from experiments.navigator.functions.draw_reward_curves import draw_reward_curves
-from experiments.navigator.functions.compute_robot_metrics import compute_robot_metrics
-from experiments.navigator.functions.visualize_robot import (
+from experiments.navigator.functions.single.draw_robots import draw_robots
+from experiments.navigator.functions.single.compute_robot_metrics import (
+    compute_robot_metrics,
+    compute_all_robots_average_metrics,
+)
+from experiments.navigator.functions.single.visualize_robot import (
     visualize_robot,
     visualize_selected_robot,
+)
+from experiments.navigator.functions.multi.draw_robot_metrics_curves import (
+    draw_robot_metric_curves,
+)
+from experiments.navigator.functions.multi.draw_reward_curves import draw_reward_curves
+from experiments.navigator.functions.multi.draw_volume_task_result import (
+    draw_volume_task_result,
+)
+from experiments.navigator.functions.multi.draw_voxcraft_task_result import (
+    draw_voxcraft_task_result,
+)
+from experiments.navigator.functions.multi.compute_critic_values import (
+    compute_critic_values,
+)
+from experiments.navigator.functions.single.compute_robot_voxcraft_performance_relative_to_t import (
+    compute_robot_voxcraft_performance_relative_to_t,
 )
 
 root_dirs_of_trials = [
@@ -36,7 +54,8 @@ def find_directories(
     root_dir_of_trials: str, trial_filter: Callable[[str], bool] = None
 ):
     trial_dirs = []
-
+    if not os.path.exists(root_dir_of_trials):
+        return trial_dirs
     source = os.listdir(root_dir_of_trials)
     source.sort(key=lambda x: os.path.getmtime(os.path.join(root_dir_of_trials, x)))
     for root_dir_of_trial in source:
@@ -82,17 +101,74 @@ if __name__ == "__main__":
         PromptChoiceDialog(
             description="",
             choices=[
-                PromptExecutableWithMultipleChoice(
+                PromptChoiceDialog(
                     description="Draw metrics for multiple trials",
-                    execute=draw_reward_curves,
                     choices=[
-                        (
-                            f"{trial_record.trial_dir}\n"
-                            f"    comment: {' '.join(trial_record.comment)}\n"
-                            f"    reward: {trial_record.max_reward:.3f}",
-                            trial_record,
-                        )
-                        for trial_record in all_trial_records
+                        PromptExecutableWithMultipleChoice(
+                            description="Draw reward curves",
+                            execute=draw_reward_curves,
+                            choices=[
+                                (
+                                    f"{trial_record.trial_dir}\n"
+                                    f"    comment: {' '.join(trial_record.comment)}\n"
+                                    f"    reward: {trial_record.max_reward:.3f}",
+                                    trial_record,
+                                )
+                                for trial_record in all_trial_records
+                            ],
+                        ),
+                        PromptExecutableWithMultipleChoice(
+                            description="Draw robot metric curves",
+                            execute=draw_robot_metric_curves,
+                            choices=[
+                                (
+                                    f"{trial_record.trial_dir}\n"
+                                    f"    comment: {' '.join(trial_record.comment)}\n"
+                                    f"    reward: {trial_record.max_reward:.3f}",
+                                    trial_record,
+                                )
+                                for trial_record in all_trial_records
+                            ],
+                        ),
+                        PromptExecutableWithMultipleChoice(
+                            description="Draw volume task result",
+                            execute=draw_volume_task_result,
+                            choices=[
+                                (
+                                    f"{trial_record.trial_dir}\n"
+                                    f"    comment: {' '.join(trial_record.comment)}\n"
+                                    f"    reward: {trial_record.max_reward:.3f}",
+                                    trial_record,
+                                )
+                                for trial_record in all_trial_records
+                            ],
+                        ),
+                        PromptExecutableWithMultipleChoice(
+                            description="Draw voxcraft task result",
+                            execute=draw_voxcraft_task_result,
+                            choices=[
+                                (
+                                    f"{trial_record.trial_dir}\n"
+                                    f"    comment: {' '.join(trial_record.comment)}\n"
+                                    f"    reward: {trial_record.max_reward:.3f}",
+                                    trial_record,
+                                )
+                                for trial_record in all_trial_records
+                            ],
+                        ),
+                        PromptExecutableWithMultipleChoice(
+                            description="Compute critic values",
+                            execute=compute_critic_values,
+                            choices=[
+                                (
+                                    f"{trial_record.trial_dir}\n"
+                                    f"    comment: {' '.join(trial_record.comment)}\n"
+                                    f"    reward: {trial_record.max_reward:.3f}",
+                                    trial_record,
+                                )
+                                for trial_record in all_trial_records
+                            ],
+                        ),
                     ],
                 ),
                 PromptChoiceDialog(
@@ -118,8 +194,18 @@ if __name__ == "__main__":
                                     input_formats=[Int(), Int(optional=True)],
                                 ),
                                 PromptExecutableWithInput(
-                                    "show metrics of best robot from epoch...",
+                                    "compute metrics of selected robot from epoch...",
                                     partial(compute_robot_metrics, trial_record),
+                                    prompt_input=f"show which epoch, from 1 to {trial_record.epochs[-1]}? "
+                                    f"(-1 for best epoch), and which robot? (from best to worst, starting from 0)",
+                                    input_formats=[Int(), Int()],
+                                ),
+                                PromptExecutableWithInput(
+                                    "compute metrics of all robots from epoch...",
+                                    partial(
+                                        compute_all_robots_average_metrics,
+                                        trial_record,
+                                    ),
                                     prompt_input=f"show which epoch, from 1 to {trial_record.epochs[-1]}? "
                                     f"(-1 for best epoch)",
                                     input_formats=[Int()],
@@ -136,6 +222,22 @@ if __name__ == "__main__":
                                     partial(visualize_selected_robot, trial_record),
                                     prompt_input=f"show which epoch, from 1 to {trial_record.epochs[-1]}? "
                                     f"(-1 for best epoch) and show how many robots?",
+                                    input_formats=[Int()],
+                                ),
+                                PromptExecutableWithInput(
+                                    "visualize selected robot from epoch...",
+                                    partial(visualize_selected_robot, trial_record),
+                                    prompt_input=f"show which epoch, from 1 to {trial_record.epochs[-1]}? "
+                                    f"(-1 for best epoch) and show how many robots?",
+                                    input_formats=[Int()],
+                                ),
+                                PromptExecutableWithInput(
+                                    "Compute robot voxcraft performance relative to t...",
+                                    partial(
+                                        compute_robot_voxcraft_performance_relative_to_t,
+                                        trial_record,
+                                    ),
+                                    prompt_input=f"The trial number to use in the save file?",
                                     input_formats=[Int()],
                                 ),
                             ],

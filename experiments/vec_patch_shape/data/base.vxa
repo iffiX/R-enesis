@@ -6,7 +6,7 @@
 	<Simulator>
 		<EnableExpansion>1</EnableExpansion>
         <Integration>
-            <DtFrac>1</DtFrac>
+            <DtFrac>2</DtFrac>
         </Integration>
 		<Condition>
 			<StopCondition>
@@ -63,7 +63,7 @@
             </Display>
             <Mechanical>
                 <MatModel>0</MatModel><!--0 = no failing-->
-                <Elastic_Mod>1e5</Elastic_Mod>
+                <Elastic_Mod>1e7</Elastic_Mod>
                 <Fail_Stress>0</Fail_Stress>
                 <Density>1500</Density>
                 <Poissons_Ratio>0.35</Poissons_Ratio>
@@ -83,7 +83,7 @@
             </Display>
             <Mechanical>
                 <MatModel>0</MatModel><!--0 = no failing-->
-                <Elastic_Mod>1e5</Elastic_Mod>
+                <Elastic_Mod>1e7</Elastic_Mod>
                 <Fail_Stress>0</Fail_Stress>
                 <Density>1500</Density>
                 <Poissons_Ratio>0.35</Poissons_Ratio>
@@ -103,7 +103,7 @@
             </Display>
             <Mechanical>
                 <MatModel>0</MatModel><!--0 = no failing-->
-                <Elastic_Mod>1e5</Elastic_Mod>
+                <Elastic_Mod>1e7</Elastic_Mod>
                 <Fail_Stress>0</Fail_Stress>
                 <Density>1500</Density>
                 <Poissons_Ratio>0.35</Poissons_Ratio>

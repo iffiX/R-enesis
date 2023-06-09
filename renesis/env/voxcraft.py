@@ -7,7 +7,13 @@ from ray.rllib import VectorEnv
 from ray.rllib.utils import override
 from renesis.sim import Voxcraft
 from renesis.utils.voxcraft import vxd_creator, get_voxel_positions
-from renesis.utils.metrics import max_z, table, distance_traveled, has_fallen
+from renesis.utils.metrics import (
+    max_z,
+    table,
+    distance_traveled,
+    distance_traveled_of_com,
+    has_fallen,
+)
 from renesis.utils.debug import enable_debugger
 from renesis.env_model.base import BaseModel
 from renesis.env_model.cppn import (
@@ -217,7 +223,7 @@ class VoxcraftBaseEnvironment(VectorEnv):
             else:
                 reward = table(final_positions)
         elif self.reward_type == "distance_traveled":
-            reward = distance_traveled(initial_positions, final_positions)
+            reward = distance_traveled_of_com(initial_positions, final_positions)
             if reward < 1e-3:
                 reward = 0
         else:
@@ -562,14 +568,15 @@ class VoxcraftSingleRewardBaseEnvironment(VectorEnv):
             else:
                 reward = table(final_positions)
         elif self.reward_type == "distance_traveled":
-            reward = distance_traveled(initial_positions, final_positions)
+            reward = distance_traveled_of_com(initial_positions, final_positions)
             if reward < 1e-3:
                 reward = 0
         elif self.reward_type == "distance_traveled_efficiency":
             robot_voxels = model.get_robot_voxels()
             sizes, *_ = model.get_robot()
             reward = 10 * (
-                distance_traveled(initial_positions, final_positions) / max(sizes)
+                distance_traveled_of_com(initial_positions, final_positions)
+                / max(sizes)
                 + (np.sum(robot_voxels == 1) / np.sum(robot_voxels != 0))
             )
             # print(f"ratio:{np.sum(robot_voxels == 1) / np.sum(robot_voxels != 0)}")

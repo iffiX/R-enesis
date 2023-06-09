@@ -15,6 +15,7 @@ from renesis.utils.metrics import (
     max_z,
     table,
     distance_traveled,
+    distance_traveled_of_com,
     has_fallen,
 )
 from renesis.utils.debug import enable_debugger
@@ -112,12 +113,22 @@ class VoxcraftSingleRewardBaseEnvironmentForVecEnvModel(VectorEnv):
         all_start_pos, all_end_pos = [], []
         all_start_com, all_end_com = [], []
         for result in results:
-            start_pos, end_pos = get_voxel_positions(result, voxel_size=self.voxel_size)
-            start_com, end_com = get_center_of_mass(result, voxel_size=self.voxel_size)
-            all_start_pos.append(start_pos)
-            all_end_pos.append(end_pos)
-            all_start_com.append(start_com)
-            all_end_com.append(end_com)
+            if result is not None:
+                start_pos, end_pos = get_voxel_positions(
+                    result, voxel_size=self.voxel_size
+                )
+                start_com, end_com = get_center_of_mass(
+                    result, voxel_size=self.voxel_size
+                )
+                all_start_pos.append(start_pos)
+                all_end_pos.append(end_pos)
+                all_start_com.append(start_com)
+                all_end_com.append(end_com)
+            else:
+                all_start_pos.append(None)
+                all_end_pos.append(None)
+                all_start_com.append(None)
+                all_end_com.append(None)
         self.end_rewards = self.compute_reward_from_sim_result(
             all_start_pos,
             all_end_pos,
@@ -139,7 +150,12 @@ class VoxcraftSingleRewardBaseEnvironmentForVecEnvModel(VectorEnv):
             recording string.
         """
         robots = []
-        for sizes, representation in self.vec_env_model.get_robots():
+        valid_indices = []
+        for idx, (sizes, representation) in enumerate(self.vec_env_model.get_robots()):
+            if sizes[0] == 0:
+                # which means robot is empty since all three sizes are 0
+                continue
+            valid_indices.append(idx)
             robots.append(vxd_creator(sizes, representation, record_history=True))
         begin = time()
         for attempt in range(3):
@@ -164,7 +180,18 @@ class VoxcraftSingleRewardBaseEnvironmentForVecEnvModel(VectorEnv):
                     f"{len(robots)} simulations total {end - begin:.3f}s, "
                     f"average {(end - begin) / len(robots):.3f}s"
                 )
-                return robots, out
+                all_robots = [None] * self.vec_env_model.env_num
+                all_out = [
+                    [None] * self.vec_env_model.env_num,
+                    [None] * self.vec_env_model.env_num,
+                ]
+                for idx, robot, result, record in zip(
+                    valid_indices, robots, out[0], out[1]
+                ):
+                    all_robots[idx] = robot
+                    all_out[0][idx] = result
+                    all_out[1][idx] = record
+                return all_robots, all_out
 
     def compute_reward_from_sim_result(
         self, all_start_pos, all_end_pos, all_start_com, all_end_com, all_voxels
@@ -175,30 +202,52 @@ class VoxcraftSingleRewardBaseEnvironmentForVecEnvModel(VectorEnv):
         rewards = []
         if self.reward_type == "max_z":
             for start_pos, end_pos in zip(all_start_pos, all_end_pos):
-                if has_fallen(start_pos, end_pos, self.fallen_threshold):
+                if (
+                    has_fallen(start_pos, end_pos, self.fallen_threshold)
+                    or start_pos is None
+                ):
                     reward = 0
                 else:
                     reward = max_z(end_pos)
                 rewards.append(reward)
         elif self.reward_type == "table":
             for start_pos, end_pos in zip(all_start_pos, all_end_pos):
-                if has_fallen(start_pos, end_pos, self.fallen_threshold):
+                if (
+                    has_fallen(start_pos, end_pos, self.fallen_threshold)
+                    or start_pos is None
+                ):
                     reward = 0
                 else:
                     reward = table(end_pos)
                 rewards.append(reward)
         elif self.reward_type == "distance_traveled":
-            for start_com, end_com in zip(all_start_com, all_end_com):
-                reward = distance_traveled(start_com, end_com)
-                if reward < 1e-3:
+            # TODO: fix this
+            # for start_com, end_com in zip(all_start_com, all_end_com):
+            #     if start_com is None:
+            #         reward = 0
+            #     else:
+            #         reward = distance_traveled_of_com(start_com, end_com)
+            #         if reward < 1e-3:
+            #             reward = 0
+            #     rewards.append(reward)
+            # TODO: for now to maintain consistency, use previous result
+            for start_pos, end_pos in zip(all_start_pos, all_end_pos):
+                if start_pos is None:
                     reward = 0
+                else:
+                    reward = distance_traveled(start_pos, end_pos)
+                    if reward < 1e-3:
+                        reward = 0
                 rewards.append(reward)
         elif self.reward_type == "distance_traveled_restricted_axis":
             for start_com, end_com in zip(all_start_com, all_end_com):
-                diff = np.abs(end_com - start_com)
-                reward = diff[0] - diff[1] - diff[2]
-                if reward < 1e-3:
+                if start_com is None:
                     reward = 0
+                else:
+                    diff = np.abs(end_com - start_com)
+                    reward = diff[0] - diff[1] - diff[2]
+                    if reward < 1e-3:
+                        reward = 0
                 rewards.append(reward)
         else:
             raise Exception("Unknown reward type: {self.reward_type}")

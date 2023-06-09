@@ -98,6 +98,8 @@ class VectorizedPatchModel(BaseVectorizedModel):
     @staticmethod
     def get_robots_worker(args):
         robot_voxels, robot_occupied = get_robot_voxels_from_voxels(*args)
+        if not np.any(robot_occupied):
+            return (0, 0, 0), []
         x_occupied = [
             x for x in range(robot_occupied.shape[0]) if np.any(robot_occupied[x])
         ]
@@ -164,7 +166,9 @@ class VectorizedPatchModel(BaseVectorizedModel):
         patch_radius = self.patch_size / 2
         for idx, patch in enumerate(self.vec_patches):
             # patch shape [env_num, action_dim]
-            patch = t.from_numpy(self.scale(patch)).to(self.device)
+            patch = t.from_numpy(self.scale(patch)).to(
+                device=self.device, dtype=t.float32
+            )
             # covered shape [env_num, coord_num]
             covered = t.all(
                 t.stack(
@@ -242,7 +246,9 @@ class VectorizedPatchSphereModel(VectorizedPatchModel):
         patch_radius = (self.patch_size - 1) / 2 + 1e-3
         for idx, patch in enumerate(self.vec_patches):
             # patch shape [env_num, action_dim]
-            patch = t.from_numpy(self.scale(patch)).to(self.device)
+            patch = t.from_numpy(self.scale(patch)).to(
+                device=self.device, dtype=t.float32
+            )
             # patch_center shape [env_num, 1, 3]
             patch_center = t.round(patch[:, None, :3])
             # covered shape [env_num, coord_num]
