@@ -1,7 +1,8 @@
 from renesis.env.vec_voxcraft import (
-    VoxcraftSingleRewardVectorizedPatchEnvironment,
+    VoxcraftSingleRewardVectorizedPatchWithTimestepsEnvironment,
 )
-from experiments.vec_patch_voxcraft.utils import *
+from launch.config import modify_config
+from experiments.vec_patch_anneal_std_voxcraft.utils import *
 
 dimension_size = (20, 20, 20)
 materials = (0, 1, 2, 3)
@@ -15,7 +16,7 @@ rollout = 1
 patch_size = 2
 
 config = {
-    "env": VoxcraftSingleRewardVectorizedPatchEnvironment,
+    "env": VoxcraftSingleRewardVectorizedPatchWithTimestepsEnvironment,
     "env_config": {
         "debug": False,
         "dimension_size": dimension_size,
@@ -41,7 +42,7 @@ config = {
     "lr": 1e-4,
     "rollout_fragment_length": steps,
     "vf_clip_param": 10**5,
-    "seed": 145345,
+    "seed": 317276,
     "num_workers": workers,
     "num_gpus": 0.1,
     "num_gpus_per_worker": 0.6,
@@ -57,9 +58,10 @@ config = {
             "max_steps": steps,
             "dimension_size": dimension_size,
             "materials": materials,
-            "normalize_mode": "clip",
-            "initial_std_bias_in_voxels": 0,
+            "anneal_func": lambda ts: t.zeros_like(ts),
         },
     },
     "callbacks": CustomCallbacks,
 }
+
+modify_config(globals())

@@ -1,56 +1,41 @@
 import os
 import sys
-import shutil
-import subprocess
+import argparse
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(PROJECT_ROOT)
 
 # Make sure c++ modules are compiled
 from renesis.sim import *
-
-from launch.snapshot import init_config, get_snapshot_comment_file, get_snapshot
+from launch.run_experiments import run_single_experiment
 
 if __name__ == "__main__":
     """
     Launch any experiment file in a temporary snapshot to prevent
     code from being changed while running.
 
-    python main.py experiments/some_some_experiment/some_optimize.py some_args
+    python main.py -s experiments/some_some_experiment/some_optimize.py
+    python main.py -m experiments/multiple/some_multi_experiment.py
     """
-    init_config()
-    comment_file, comment_dir = get_snapshot_comment_file()
-    snapshot_dir = get_snapshot(code_only=False)
+    parser = argparse.ArgumentParser(description="Script for running experiments.")
 
-    with open(os.path.join(snapshot_dir, "LAUNCH_COMMAND.sh"), "w") as file:
-        file.write(" ".join([sys.executable] + sys.argv[1:]))
+    # Add the necessary arguments
+    parser.add_argument(
+        "-s", "--single", metavar="PYTHON FILE", help="Run a single experiment"
+    )
+    parser.add_argument(
+        "-m", "--multiple", metavar="PYTHON FILE", help="Run multiple experiments"
+    )
 
-    # Move comment file to the snapshot dir, so it will be saved by the
-    # experiment runners when they call get_snapshot()
-    shutil.copy2(comment_file, snapshot_dir)
-    shutil.rmtree(comment_dir)
+    # Parse the command-line arguments
+    args = parser.parse_args()
 
-    # Launch python process from the snapshot dir
-    command = [sys.executable] + sys.argv[1:]
+    # Check which argument was provided and execute the corresponding code
+    if args.single:
+        print(f"Running single experiment: {args.single}")
+        run_single_experiment(args.single)
 
-    process = None
-    try:
-        process = subprocess.Popen(
-            command,
-            cwd=snapshot_dir,
-            env=os.environ.update({"PYTHONPATH": snapshot_dir}),
-            start_new_session=True,
-        )
-        code = process.wait()
-        print(f"Launch exited with code {code}")
-        if code != 0:
-            print(f"Inspect temp code directory {snapshot_dir}")
-        else:
-            print(f"Removing temp code directory {snapshot_dir}")
-            shutil.rmtree(snapshot_dir)
-    except KeyboardInterrupt:
-        if process is not None:
-            print("Keyboard interrupt received, killing instance")
-            process.kill()
-        print(f"Removing temp code directory {snapshot_dir}")
-        shutil.rmtree(snapshot_dir)
+    if args.multiple:
+        print(f"Running multiple experiments: {args.multiple}")
+        with open(args.multiple, "r") as script:
+            exec(script.read())

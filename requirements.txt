@@ -24,3 +24,4 @@ vtk~=9.2.2
 psutil~=5.9.3
 h5py
 seaborn
+dill

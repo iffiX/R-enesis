@@ -6,19 +6,15 @@ from multiprocessing.pool import Pool
 import matplotlib.pyplot as plt
 from typing import List
 from experiments.navigator.trial import TrialRecord
-
-_cahce_dir = os.path.join(
-    os.path.realpath(os.path.dirname(__file__)),
-    os.path.pardir,
-    os.path.pardir,
-    "reward_cache",
-)
+from experiments.navigator.utils import get_cache_directory
 
 
 def generate_reward_metrics_for_trial(record: TrialRecord):
-    os.makedirs(_cahce_dir, exist_ok=True)
     metrics = {}
-    cache_path = os.path.join(_cahce_dir, record.trial_dir.replace("/", "#") + ".cache")
+    cache_path = os.path.join(
+        get_cache_directory("reward_cache"),
+        record.trial_dir.replace("/", "#") + ".cache",
+    )
     if os.path.exists(cache_path):
         with open(os.path.join(cache_path), "rb") as cache_file:
             return pickle.load(cache_file)

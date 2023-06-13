@@ -16,14 +16,8 @@ from renesis.utils.metrics import (
     get_passive_material_ratio,
 )
 from experiments.navigator.trial import TrialRecord
+from experiments.navigator.utils import get_cache_directory
 from experiments.navigator.functions.multi.draw_reward_curves import smooth
-
-_cahce_dir = os.path.join(
-    os.path.realpath(os.path.dirname(__file__)),
-    os.path.pardir,
-    os.path.pardir,
-    "robot_metrics_cache",
-)
 
 _robot_metrics_keys = [
     "volume",
@@ -40,18 +34,23 @@ _robot_metrics_keys = [
 
 _show_robot_metrics_keys = [
     "volume",
+    "surface_area",
+    "surface_voxels",
+    "surface_area_to_total_volume_ratio",
     "surface_voxels_to_total_volume_ratio",
-    "passive_material_ratio",
     "section_num",
     "reflection_symmetry",
     "gzip_compressed_ratio",
+    "passive_material_ratio",
+    "largest_connected_component_ratio",
 ]
 
 
 def generate_robot_metrics_for_trial(record: TrialRecord):
-    os.makedirs(_cahce_dir, exist_ok=True)
-
-    cache_path = os.path.join(_cahce_dir, record.trial_dir.replace("/", "#") + ".cache")
+    cache_path = os.path.join(
+        get_cache_directory("robot_metrics_cache"),
+        record.trial_dir.replace("/", "#") + ".cache",
+    )
     if os.path.exists(cache_path):
         with open(os.path.join(cache_path), "rb") as cache_file:
             return pickle.load(cache_file)

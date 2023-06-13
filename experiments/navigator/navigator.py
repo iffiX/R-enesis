@@ -29,6 +29,7 @@ from experiments.navigator.functions.multi.draw_robot_metrics_curves import (
     draw_robot_metric_curves,
 )
 from experiments.navigator.functions.multi.draw_reward_curves import draw_reward_curves
+from experiments.navigator.functions.multi.draw_std_curves import draw_std_curves
 from experiments.navigator.functions.multi.draw_volume_task_result import (
     draw_volume_task_result,
 )
@@ -46,6 +47,7 @@ root_dirs_of_trials = [
     "/home/mlw0504/ray_results",
     "/home/mlw0504/ray_results_vss5",
     "/home/mlw0504/ray_results_quest",
+    "/home/mlw0504/ray_results_luna",
     "/home/mlw0504/Projects/R-enesis_results/task_voxcraft_20x20x20_T=100",
 ]
 
@@ -107,6 +109,19 @@ if __name__ == "__main__":
                         PromptExecutableWithMultipleChoice(
                             description="Draw reward curves",
                             execute=draw_reward_curves,
+                            choices=[
+                                (
+                                    f"{trial_record.trial_dir}\n"
+                                    f"    comment: {' '.join(trial_record.comment)}\n"
+                                    f"    reward: {trial_record.max_reward:.3f}",
+                                    trial_record,
+                                )
+                                for trial_record in all_trial_records
+                            ],
+                        ),
+                        PromptExecutableWithMultipleChoice(
+                            description="Draw std curves",
+                            execute=draw_std_curves,
                             choices=[
                                 (
                                     f"{trial_record.trial_dir}\n"
@@ -214,21 +229,14 @@ if __name__ == "__main__":
                                     "visualize history of best robot from epoch...",
                                     partial(visualize_robot, trial_record),
                                     prompt_input=f"show which epoch, from 1 to {trial_record.epochs[-1]}? "
-                                    f"(-1 for best epoch) and show how many robots?",
+                                    f"(-1 for best epoch)",
                                     input_formats=[Int()],
                                 ),
                                 PromptExecutableWithInput(
-                                    "visualize selected robot from epoch...",
+                                    "visualize history of selected robot from epoch...",
                                     partial(visualize_selected_robot, trial_record),
                                     prompt_input=f"show which epoch, from 1 to {trial_record.epochs[-1]}? "
-                                    f"(-1 for best epoch) and show how many robots?",
-                                    input_formats=[Int()],
-                                ),
-                                PromptExecutableWithInput(
-                                    "visualize selected robot from epoch...",
-                                    partial(visualize_selected_robot, trial_record),
-                                    prompt_input=f"show which epoch, from 1 to {trial_record.epochs[-1]}? "
-                                    f"(-1 for best epoch) and show how many robots?",
+                                    f"(-1 for best epoch)",
                                     input_formats=[Int()],
                                 ),
                                 PromptExecutableWithInput(

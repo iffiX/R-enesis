@@ -25,6 +25,7 @@ from renesis.env_model.vec_patch import (
     VectorizedPatchModel,
     VectorizedPatchSphereModel,
     VectorizedPatchFixedPhaseOffsetModel,
+    VectorizedPatchWithTimestepsModel,
 )
 from renesis.utils.metrics import get_surface_area, get_volume, get_bounding_box_sizes
 
@@ -221,16 +222,6 @@ class VoxcraftSingleRewardBaseEnvironmentForVecEnvModel(VectorEnv):
                     reward = table(end_pos)
                 rewards.append(reward)
         elif self.reward_type == "distance_traveled":
-            # TODO: fix this
-            # for start_com, end_com in zip(all_start_com, all_end_com):
-            #     if start_com is None:
-            #         reward = 0
-            #     else:
-            #         reward = distance_traveled_of_com(start_com, end_com)
-            #         if reward < 1e-3:
-            #             reward = 0
-            #     rewards.append(reward)
-            # TODO: for now to maintain consistency, use previous result
             for start_pos, end_pos in zip(all_start_pos, all_end_pos):
                 if start_pos is None:
                     reward = 0
@@ -239,7 +230,16 @@ class VoxcraftSingleRewardBaseEnvironmentForVecEnvModel(VectorEnv):
                     if reward < 1e-3:
                         reward = 0
                 rewards.append(reward)
-        elif self.reward_type == "distance_traveled_restricted_axis":
+        elif self.reward_type == "distance_traveled_com":
+            for start_com, end_com in zip(all_start_com, all_end_com):
+                if start_com is None:
+                    reward = 0
+                else:
+                    reward = distance_traveled_of_com(start_com, end_com)
+                    if reward < 1e-3:
+                        reward = 0
+                rewards.append(reward)
+        elif self.reward_type == "distance_traveled_com_restricted_axis":
             for start_com, end_com in zip(all_start_com, all_end_com):
                 if start_com is None:
                     reward = 0
@@ -322,6 +322,32 @@ class VoxcraftSingleRewardVectorizedPatchFixedPhaseOffsetEnvironment(
         super().__init__(
             config,
             VectorizedPatchFixedPhaseOffsetModel(
+                dimension_size=config["dimension_size"],
+                patch_size=config["patch_size"],
+                max_patch_num=config["max_patch_num"],
+                env_num=config["num_envs"],
+            ),
+        )
+
+    def vector_step(self, actions):
+        normalize_mode = self.config.get("normalize_mode", "clip")
+        return super().vector_step(
+            [normalize(action, mode=normalize_mode) for action in actions]
+        )
+
+
+class VoxcraftSingleRewardVectorizedPatchWithTimestepsEnvironment(
+    VoxcraftSingleRewardBaseEnvironmentForVecEnvModel
+):
+    def __init__(self, config):
+        if config.get("debug", False):
+            enable_debugger(
+                config.get("debug_ip", "localhost"), config.get("debug_port", 8223)
+            )
+        super().__init__(
+            config,
+            VectorizedPatchWithTimestepsModel(
+                materials=config["materials"],
                 dimension_size=config["dimension_size"],
                 patch_size=config["patch_size"],
                 max_patch_num=config["max_patch_num"],

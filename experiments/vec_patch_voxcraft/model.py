@@ -1,8 +1,9 @@
 import torch
 import torch.nn as nn
+from typing import Optional
 from ray.rllib.models import ModelCatalog
-from ray.rllib.models.torch.attention_net import *
-from ray.rllib.models.torch.modules.relative_multi_head_attention import *
+from ray.rllib.models.torch.torch_modelv2 import ModelV2
+from ray.rllib.models.torch.fcnet import *
 from ray.rllib.algorithms.ppo import PPO
 from renesis.utils.debug import print_model_size, enable_debugger
 

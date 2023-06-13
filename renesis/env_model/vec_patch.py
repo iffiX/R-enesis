@@ -356,3 +356,52 @@ class VectorizedPatchFixedPhaseOffsetModel(VectorizedPatchModel):
             )
             representation.append(layer_representation)
         return (max_x - min_x, max_y - min_y, max_z - min_z), representation
+
+
+class VectorizedPatchWithTimestepsModel(VectorizedPatchModel):
+    def __init__(
+        self,
+        materials=(0, 1, 2),
+        dimension_size=(20, 20, 20),
+        patch_size=1,
+        max_patch_num=100,
+        env_num=100,
+        device=None,
+    ):
+        super().__init__(
+            materials=materials,
+            dimension_size=dimension_size,
+            patch_size=patch_size,
+            max_patch_num=max_patch_num,
+            env_num=env_num,
+            device=device,
+        )
+        self.timestep = 0
+
+    @property
+    def observation_space(self):
+        return Box(
+            low=np.array(
+                (0,) + (min(min(self.materials), 0),) * self.voxel_num,
+                dtype=np.float32,
+            ),
+            high=np.array(
+                (np.inf,) + (max(max(self.materials), 0),) * self.voxel_num,
+                dtype=np.float32,
+            ),
+        )
+
+    @property
+    def initial_observation_after_reset_single_env(self):
+        return np.zeros([1 + self.voxel_num], dtype=np.float32)
+
+    def step(self, actions: np.ndarray):
+        super().step(actions)
+        self.timestep += 1
+
+    def observe(self):
+        all_obs = super().observe()
+        return [
+            np.concatenate([np.array([self.timestep], dtype=obs.dtype), obs])
+            for obs in all_obs
+        ]
