@@ -20,6 +20,7 @@ INCLUDE = [
     "main.py",
     "README.md",
     "requirements.txt",
+    "modify.*",
 ]
 EXCLUDE = ["*__pycache__*"]
 INCLUDE_CODE_ONLY = INCLUDE

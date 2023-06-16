@@ -18,7 +18,7 @@ if __name__ == "__main__":
         CustomPPO,
         config=config,
         name="",
-        checkpoint_freq=1,
+        checkpoint_freq=10,
         log_to_file=True,
         stop={
             "timesteps_total": config["train_batch_size"] * iters,

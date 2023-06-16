@@ -1,9 +1,11 @@
+import shutil
+import tqdm
+import inspect
 import torch
 import torch.nn as nn
-from typing import Optional
 from ray.rllib.models import ModelCatalog
-from ray.rllib.models.torch.torch_modelv2 import ModelV2
-from ray.rllib.models.torch.fcnet import *
+from ray.rllib.models.torch.attention_net import *
+from ray.rllib.models.torch.modules.relative_multi_head_attention import *
 from ray.rllib.algorithms.ppo import PPO
 from renesis.utils.debug import print_model_size, enable_debugger
 
@@ -95,8 +97,6 @@ class Actor(TorchModelV2, nn.Module):
         offset = action_out.shape[-1] // 2
         bias = self.anneal_func(timesteps).to(device=action_out.device).unsqueeze(1)
         action_out[:, offset : offset + 3] += bias
-        # if int(timesteps[0]) % self.max_steps == 0:
-        # print(f"Timestep: {timesteps}, Bias: {bias}")
         return action_out, []
 
     @override(ModelV2)
@@ -111,4 +111,46 @@ class CustomPPO(PPO):
     _allow_unknown_configs = True
 
 
-ModelCatalog.register_custom_model("actor_model", Actor)
+import os
+import ray
+import pickle
+import importlib.util
+import numpy as np
+from experiments.navigator.trial import TrialRecord
+from renesis.env.vec_voxcraft import VoxcraftSingleRewardVectorizedPatchEnvironment
+
+
+def debug_model_output(record: TrialRecord):
+    ray.init()
+    ModelCatalog.register_custom_model("actor_model", Actor)
+    spec = importlib.util.spec_from_file_location(
+        "config_mod",
+        os.path.join(
+            record.code_dir, "experiments", record.get_experiment_name(), "config.py"
+        ),
+    )
+    config_mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(config_mod)
+    algo = CustomPPO(config=config_mod.config)
+    print(record.checkpoints[-1])
+    algo.restore(record.checkpoints[-1])
+    policy = algo.get_policy()
+    print(config_mod.config["env_config"]["base_config_path"])
+    env = config_mod.config["env"](config_mod.config["env_config"])
+    env.max_steps = 1
+    env.set_timestep(policy.global_timestep // config_mod.envs)
+    obs = env.vector_reset()
+
+    for i in range(config_mod.steps):
+        # Compute an action (`a`).
+        a, state_out, *_ = policy.compute_actions_from_input_dict(
+            input_dict={"obs": obs},
+            explore=True,
+        )
+        obs, reward, done, _ = env.vector_step(a)
+    algo.stop()
+    try:
+        shutil.rmtree(algo.logdir)
+    except:
+        pass
+    ray.shutdown()

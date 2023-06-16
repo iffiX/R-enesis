@@ -44,7 +44,13 @@ def compute_reward_metrics_for_epoch(epoch_data_file_path):
     ) as file:
         data = pickle.load(file)
         rewards = np.array([d["reward"] for d in data])
-        return (np.max(rewards), np.min(rewards), np.mean(rewards))
+        return (
+            np.max(rewards),
+            np.min(rewards),
+            np.mean(rewards),
+            np.std(rewards),
+            len(rewards),
+        )
 
 
 def smooth(scalars: np.array, window_size: int = 5) -> np.array:
@@ -57,7 +63,7 @@ def smooth(scalars: np.array, window_size: int = 5) -> np.array:
     return np.array(smoothed)
 
 
-def draw_reward_curves(records: List[TrialRecord]):
+def draw_reward_curve(records: List[TrialRecord]):
     truncated_epochs = list(range(1, min(record.epochs[-1] for record in records) + 1))
     reward_curves = np.zeros([len(records), len(truncated_epochs)])
     print(f"show epoch num: {truncated_epochs[-1]}")
@@ -66,7 +72,6 @@ def draw_reward_curves(records: List[TrialRecord]):
         for epoch in truncated_epochs:
             # mean
             reward_curves[record_idx, epoch - 1] = metrics[epoch][2]
-        # plt.plot(truncated_epochs, reward_curves[record_idx, :])
     std = np.std(reward_curves, axis=0)
     mean = np.mean(reward_curves, axis=0)
     shift = std * 2.576 / np.sqrt(len(records))
@@ -83,8 +88,80 @@ def draw_reward_curves(records: List[TrialRecord]):
     )
 
     plt.ylim(0, np.max(mean + shift) * 1.1)
-    # plt.ylabel("Travel distance in voxels")
-    plt.ylabel("Volume")
+    plt.ylabel("Travel distance in voxels")
+    # plt.ylabel("Volume")
+    plt.xlabel("Epoch")
+    plt.title("Rewards")
+    plt.show()
+
+
+def draw_separate_reward_curves(records: List[TrialRecord]):
+    truncated_epochs = list(range(1, min(record.epochs[-1] for record in records) + 1))
+    reward_curves = np.zeros([len(records), len(truncated_epochs)])
+    print(f"show epoch num: {truncated_epochs[-1]}")
+    labels = [
+        "log std bias 1->0",
+        "log std bias 1->0.25",
+        "log std bias 1->0.5",
+        "no bias",
+    ]
+    for record_idx, record in enumerate(records):
+        metrics = generate_reward_metrics_for_trial(record)
+        for epoch in truncated_epochs:
+            # mean
+            reward_curves[record_idx, epoch - 1] = metrics[epoch][2]
+        plt.plot(
+            truncated_epochs,
+            smooth(reward_curves[record_idx, :]),
+            label=labels[record_idx],  # label=f"Record {record_idx}"
+        )
+
+    plt.ylim(0, np.max(reward_curves) * 1.1)
+    plt.ylabel("Travel distance in voxels")
+    # plt.ylabel("Volume")
+    plt.legend()
+    plt.xlabel("Epoch")
+    plt.title("Rewards")
+    plt.show()
+
+
+def draw_separate_reward_curves_with_batch_std(records: List[TrialRecord]):
+    truncated_epochs = list(range(1, min(record.epochs[-1] for record in records) + 1))
+    reward_curves = np.zeros([len(records), len(truncated_epochs), 3])
+    print(f"show epoch num: {truncated_epochs[-1]}")
+    labels = [
+        "log std bias 1->0",
+        "log std bias 1->0.25",
+        "log std bias 1->0.5",
+        "no bias",
+    ]
+    current_curve_max = -np.inf
+    for record_idx, record in enumerate(records):
+        metrics = generate_reward_metrics_for_trial(record)
+        for epoch in truncated_epochs:
+            # mean
+            reward_curves[record_idx, epoch - 1] = metrics[epoch][2:]
+        std = reward_curves[record_idx, :, 1]
+        mean = reward_curves[record_idx, :, 0]
+        shift = std * 2.576 / np.sqrt(reward_curves[record_idx, :, 2])
+        plt.fill_between(
+            truncated_epochs,
+            mean - shift,
+            mean + shift,
+            color=f"skyblue",
+        )
+        plt.plot(
+            truncated_epochs,
+            smooth(mean),
+            color=f"steelblue",
+            label=labels[record_idx],
+        )
+        current_curve_max = max(np.max(mean + shift), current_curve_max)
+
+    plt.ylim(0, current_curve_max * 1.1)
+    plt.ylabel("Travel distance in voxels")
+    # plt.ylabel("Volume")
+    plt.legend()
     plt.xlabel("Epoch")
     plt.title("Rewards")
     plt.show()

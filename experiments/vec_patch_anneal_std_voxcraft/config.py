@@ -64,4 +64,4 @@ config = {
     "callbacks": CustomCallbacks,
 }
 
-modify_config(globals())
+modify_config(globals(), __file__)

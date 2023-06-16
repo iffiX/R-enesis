@@ -10,7 +10,7 @@ steps = 100
 
 
 workers = 1
-envs = 128
+envs = 1000
 rollout = 1
 patch_size = 2
 

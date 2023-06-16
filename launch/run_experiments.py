@@ -72,7 +72,10 @@ def run_multiple_experiments(
         with open(os.path.join(snapshot_dir, "COMMENT.txt"), "w") as file:
             file.write(comment)
 
-        create_config_modifier(modifier_dict, snapshot_dir)
+        create_config_modifier(
+            modifier_dict,
+            os.path.join(snapshot_dir, os.path.dirname(experiment_py_relative_path)),
+        )
         snapshot_dirs.append(snapshot_dir)
 
     processes = []

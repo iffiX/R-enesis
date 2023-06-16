@@ -22,8 +22,8 @@ def merge_dict(target, source, path=None, changes=None):
     return target, changes
 
 
-def modify_config(global_dict):
-    modify_file = os.path.join(PROJECT_ROOT, "modify.json")
+def modify_config(global_dict, config_file_path):
+    modify_file = os.path.join(os.path.dirname(config_file_path), "modify.data")
     if os.path.exists(modify_file):
         with open(modify_file, "rb") as file:
             modify = dill.load(file)
@@ -47,8 +47,8 @@ def modify_config(global_dict):
 
 
 def create_config_modifier(
-    modifier_dict: Dict[str, Any], project_root: Any, require_global_present=True
+    modifier_dict: Dict[str, Any], experiment_dir: Any, require_global_present=True
 ):
-    with open(os.path.join(project_root, "modify.json"), "wb") as file:
+    with open(os.path.join(experiment_dir, "modify.data"), "wb") as file:
         modifier_dict["!require_global_present"] = require_global_present
         dill.dump(modifier_dict, file)

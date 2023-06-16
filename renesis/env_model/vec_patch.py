@@ -154,15 +154,21 @@ class VectorizedPatchModel(BaseVectorizedModel):
             t.range(-offset, size - offset - 1, dtype=t.long, device=self.device)
             for size, offset in zip(self.dimension_size, self.center_voxel_offset)
         ]
-        # coords shape [env_num, coord_num, 3]
+        # coords shape [1, coord_num, 3]
         coords = (
             t.stack(t.meshgrid(*indices, indexing="ij"))
             .view(3, -1)
             .transpose(1, 0)
             .unsqueeze(0)
-            .repeat(self.env_num, 1, 1)
         )
-        all_values = []
+        biggest_value = t.zeros(
+            [self.env_num, np.prod(self.dimension_size)], device=self.device
+        )
+        biggest_value_idx = t.zeros(
+            [self.env_num, np.prod(self.dimension_size)],
+            device=self.device,
+            dtype=t.int64,
+        )
         patch_radius = self.patch_size / 2
         for idx, patch in enumerate(self.vec_patches):
             # patch shape [env_num, action_dim]
@@ -187,15 +193,16 @@ class VectorizedPatchModel(BaseVectorizedModel):
             # so previous patches will be overwritten
             # Add 1 so that the first patch is not zero
             # because idx starts from 0
-            all_values.append(covered * (idx + 1))
+            patch_value = (covered * (idx + 1)).to(dtype=t.float32)
+            overwrite_idx = patch_value > biggest_value
+            biggest_value = t.where(overwrite_idx, patch_value, biggest_value)
+            biggest_value_idx = t.where(overwrite_idx, idx, biggest_value_idx)
 
         vec_voxels = t.zeros(
             [self.env_num] + self.dimension_size, dtype=t.float32, device=self.device
         )
 
         if self.vec_patches:
-            # all_values shape [env_num, coord_num, patch_num]
-            all_values = t.stack(all_values, dim=-1)
             # material map shape [env_num, patch_num]
             material_map = t.tensor(
                 [
@@ -209,8 +216,8 @@ class VectorizedPatchModel(BaseVectorizedModel):
             ).transpose(1, 0)
             # material shape [env_num, coord_num]
             material = t.where(
-                t.any(all_values > 0, dim=-1),
-                t.gather(input=material_map, dim=1, index=t.argmax(all_values, dim=-1)),
+                biggest_value > 0,
+                t.gather(input=material_map, dim=1, index=biggest_value_idx),
                 0,
             )
 
@@ -393,7 +400,7 @@ class VectorizedPatchWithTimestepsModel(VectorizedPatchModel):
 
     @property
     def initial_observation_after_reset_single_env(self):
-        return np.zeros([1 + self.voxel_num], dtype=np.float32)
+        return np.array([self.timestep] + [0] * self.voxel_num, dtype=np.float32)
 
     def step(self, actions: np.ndarray):
         super().step(actions)

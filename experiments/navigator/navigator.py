@@ -28,8 +28,15 @@ from experiments.navigator.functions.single.visualize_robot import (
 from experiments.navigator.functions.multi.draw_robot_metrics_curves import (
     draw_robot_metric_curves,
 )
-from experiments.navigator.functions.multi.draw_reward_curves import draw_reward_curves
+from experiments.navigator.functions.multi.draw_reward_curves import (
+    draw_reward_curve,
+    draw_separate_reward_curves,
+    draw_separate_reward_curves_with_batch_std,
+)
 from experiments.navigator.functions.multi.draw_std_curves import draw_std_curves
+from experiments.navigator.functions.multi.draw_robot_distance_curves import (
+    draw_separate_robot_distance_curves,
+)
 from experiments.navigator.functions.multi.draw_volume_task_result import (
     draw_volume_task_result,
 )
@@ -42,6 +49,7 @@ from experiments.navigator.functions.multi.compute_critic_values import (
 from experiments.navigator.functions.single.compute_robot_voxcraft_performance_relative_to_t import (
     compute_robot_voxcraft_performance_relative_to_t,
 )
+from experiments.navigator.functions.single.debug_model_output import debug_model_output
 
 root_dirs_of_trials = [
     "/home/mlw0504/ray_results",
@@ -107,8 +115,34 @@ if __name__ == "__main__":
                     description="Draw metrics for multiple trials",
                     choices=[
                         PromptExecutableWithMultipleChoice(
-                            description="Draw reward curves",
-                            execute=draw_reward_curves,
+                            description="Draw reward curve",
+                            execute=draw_reward_curve,
+                            choices=[
+                                (
+                                    f"{trial_record.trial_dir}\n"
+                                    f"    comment: {' '.join(trial_record.comment)}\n"
+                                    f"    reward: {trial_record.max_reward:.3f}",
+                                    trial_record,
+                                )
+                                for trial_record in all_trial_records
+                            ],
+                        ),
+                        PromptExecutableWithMultipleChoice(
+                            description="Draw separate reward curves",
+                            execute=draw_separate_reward_curves,
+                            choices=[
+                                (
+                                    f"{trial_record.trial_dir}\n"
+                                    f"    comment: {' '.join(trial_record.comment)}\n"
+                                    f"    reward: {trial_record.max_reward:.3f}",
+                                    trial_record,
+                                )
+                                for trial_record in all_trial_records
+                            ],
+                        ),
+                        PromptExecutableWithMultipleChoice(
+                            description="Draw separate reward curves with batch std",
+                            execute=draw_separate_reward_curves_with_batch_std,
                             choices=[
                                 (
                                     f"{trial_record.trial_dir}\n"
@@ -122,6 +156,19 @@ if __name__ == "__main__":
                         PromptExecutableWithMultipleChoice(
                             description="Draw std curves",
                             execute=draw_std_curves,
+                            choices=[
+                                (
+                                    f"{trial_record.trial_dir}\n"
+                                    f"    comment: {' '.join(trial_record.comment)}\n"
+                                    f"    reward: {trial_record.max_reward:.3f}",
+                                    trial_record,
+                                )
+                                for trial_record in all_trial_records
+                            ],
+                        ),
+                        PromptExecutableWithMultipleChoice(
+                            description="Draw separate robot distance curves",
+                            execute=draw_separate_robot_distance_curves,
                             choices=[
                                 (
                                     f"{trial_record.trial_dir}\n"
@@ -247,6 +294,13 @@ if __name__ == "__main__":
                                     ),
                                     prompt_input=f"The trial number to use in the save file?",
                                     input_formats=[Int()],
+                                ),
+                                PromptExecutable(
+                                    "Debug model output...",
+                                    partial(
+                                        debug_model_output,
+                                        trial_record,
+                                    ),
                                 ),
                             ],
                         )

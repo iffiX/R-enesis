@@ -50,7 +50,7 @@ class VoxcraftSingleRewardBaseEnvironmentForVecEnvModel(VectorEnv):
         self.end_robots = ["\n" for _ in range(config["num_envs"])]
         self.end_records = ["" for _ in range(config["num_envs"])]
 
-        self.simulator = Voxcraft()
+        self.simulator = Voxcraft(batch_size_per_device=config["num_envs"])
         self.reset_envs = set()
         super().__init__(self.observation_space, self.action_space, config["num_envs"])
 
@@ -161,7 +161,9 @@ class VoxcraftSingleRewardBaseEnvironmentForVecEnvModel(VectorEnv):
         begin = time()
         for attempt in range(3):
             try:
-                out = self.simulator.run_sims([self.base_config] * len(robots), robots)
+                out = self.simulator.run_sims(
+                    [self.base_config] * len(robots), robots, save_record=False
+                )
                 end = time()
             except Exception as e:
                 print(f"Failed attempt {attempt + 1}")
@@ -354,6 +356,9 @@ class VoxcraftSingleRewardVectorizedPatchWithTimestepsEnvironment(
                 env_num=config["num_envs"],
             ),
         )
+
+    def set_timestep(self, timestep):
+        self.vec_env_model.timestep = timestep
 
     def vector_step(self, actions):
         normalize_mode = self.config.get("normalize_mode", "clip")

@@ -18,5 +18,5 @@ class Interpolator:
                 / (self.stop_x - self.start_x)
                 * (self.stop_y - self.start_y)
                 + self.start_y
-                + 1e-3
+                + 1e-10
             )

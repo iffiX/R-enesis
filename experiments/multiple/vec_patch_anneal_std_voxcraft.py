@@ -1,4 +1,5 @@
 from experiments.multiple.interpolator import Interpolator
+from experiments.vec_patch_anneal_std_voxcraft.config import iters, steps
 from launch.run_experiments import run_multiple_experiments
 
 
@@ -9,7 +10,7 @@ run_multiple_experiments(
             "config": {
                 "model": {
                     "custom_model_config": {
-                        "anneal_func": Interpolator(100, 0, 3000, 1, 0)
+                        "anneal_func": Interpolator(steps, 0, iters, 1, 0)
                     }
                 }
             }
@@ -18,7 +19,7 @@ run_multiple_experiments(
             "config": {
                 "model": {
                     "custom_model_config": {
-                        "anneal_func": Interpolator(100, 0, 3000, 1, 0.25)
+                        "anneal_func": Interpolator(steps, 0, iters, 1, 0.25)
                     }
                 }
             }
@@ -27,7 +28,7 @@ run_multiple_experiments(
             "config": {
                 "model": {
                     "custom_model_config": {
-                        "anneal_func": Interpolator(100, 0, 3000, 1, 0.5)
+                        "anneal_func": Interpolator(steps, 0, iters, 1, 0.5)
                     }
                 }
             }
@@ -36,7 +37,7 @@ run_multiple_experiments(
             "config": {
                 "model": {
                     "custom_model_config": {
-                        "anneal_func": Interpolator(100, 0, 3000, 1, 1),
+                        "anneal_func": Interpolator(steps, 0, iters, 1, 1),
                     }
                 }
             }
@@ -46,7 +47,7 @@ run_multiple_experiments(
                 "env_config": {"reward_type": "distance_traveled_com"},
                 "model": {
                     "custom_model_config": {
-                        "anneal_func": Interpolator(100, 0, 3000, 1, 0),
+                        "anneal_func": Interpolator(steps, 0, iters, 1, 0),
                     }
                 },
             }
@@ -56,7 +57,7 @@ run_multiple_experiments(
                 "env_config": {"reward_type": "distance_traveled_com"},
                 "model": {
                     "custom_model_config": {
-                        "anneal_func": Interpolator(100, 0, 3000, 1, 0.25),
+                        "anneal_func": Interpolator(steps, 0, iters, 1, 0.25),
                     },
                 },
             }
@@ -66,7 +67,7 @@ run_multiple_experiments(
                 "env_config": {"reward_type": "distance_traveled_com"},
                 "model": {
                     "custom_model_config": {
-                        "anneal_func": Interpolator(100, 0, 3000, 1, 0.5),
+                        "anneal_func": Interpolator(steps, 0, iters, 1, 0.5),
                     },
                 },
             }
@@ -76,7 +77,7 @@ run_multiple_experiments(
                 "env_config": {"reward_type": "distance_traveled_com"},
                 "model": {
                     "custom_model_config": {
-                        "anneal_func": Interpolator(100, 0, 3000, 1, 1),
+                        "anneal_func": Interpolator(steps, 0, iters, 1, 1),
                     },
                 },
             }
