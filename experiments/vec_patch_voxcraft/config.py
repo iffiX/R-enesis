@@ -6,13 +6,14 @@ from experiments.vec_patch_voxcraft.utils import *
 dimension_size = (20, 20, 20)
 materials = (0, 1, 2, 3)
 iters = 3000
-steps = 100
+steps = 40
 
 
-workers = 1
-envs = 1000
+workers = 7
+envs = 2048
 rollout = 1
 patch_size = 2
+train_batch_size = 1024
 
 config = {
     "env": VoxcraftSingleRewardVectorizedPatchEnvironment,
@@ -35,7 +36,7 @@ config = {
     "normalize_actions": False,
     "disable_env_checking": True,
     "render_env": False,
-    "sgd_minibatch_size": envs,
+    "sgd_minibatch_size": train_batch_size,
     "num_sgd_iter": 10,
     "train_batch_size": steps * workers * envs * rollout,
     "lr": 1e-4,
@@ -43,10 +44,11 @@ config = {
     "vf_clip_param": 10**5,
     "seed": 145345,
     "num_workers": workers,
-    "num_gpus": 0.1,
-    "num_gpus_per_worker": 0.6,
+    "num_gpus": 1,
+    "num_cpus_for_driver": 16,
+    "num_gpus_per_worker": 1,
     "num_envs_per_worker": envs,
-    "num_cpus_per_worker": 1,
+    "num_cpus_per_worker": 12,
     "framework": "torch",
     "evaluation_interval": None,
     "model": {

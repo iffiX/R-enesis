@@ -11,14 +11,12 @@ from experiments.vec_patch_voxcraft.config import (
 
 
 if __name__ == "__main__":
-    # 1GB heap memory, 1GB object store
-    ray.init(_memory=1 * (10**9), object_store_memory=iters * (5 * 10**6) * 1.1)
-
+    ray.init()
     tune.run(
         CustomPPO,
         config=config,
         name="",
-        checkpoint_freq=1,
+        checkpoint_freq=10,
         log_to_file=True,
         stop={
             "timesteps_total": config["train_batch_size"] * iters,

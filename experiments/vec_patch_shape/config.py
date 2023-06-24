@@ -9,7 +9,7 @@ iters = 500
 steps = 100
 
 
-workers = 1
+workers = 2
 envs = 256
 rollout = 1
 patch_size = 2
@@ -39,10 +39,9 @@ config = {
     "vf_clip_param": 10**5,
     "seed": 635326,
     "num_workers": workers,
-    "num_gpus": 0.1,
-    "num_gpus_per_worker": 0.2,
+    "num_gpus": 1,
+    "num_gpus_per_worker": 1,
     "num_envs_per_worker": envs,
-    "placement_strategy": "SPREAD",
     "num_cpus_per_worker": 1,
     "framework": "torch",
     "evaluation_interval": None,

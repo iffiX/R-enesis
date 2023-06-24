@@ -52,7 +52,26 @@ class VoxcraftSingleRewardBaseEnvironmentForVecEnvModel(VectorEnv):
 
         self.simulator = Voxcraft(batch_size_per_device=config["num_envs"])
         self.reset_envs = set()
+        self.time = {
+            "env_model_step_time": [],
+            "env_model_observe_time": [],
+            "sim_time": 0.0,
+            "compute_reward_time": 0.0,
+        }
         super().__init__(self.observation_space, self.action_space, config["num_envs"])
+
+    def print_and_reset_time(self):
+        if len(self.time["env_model_step_time"]) > 0:
+            print(f"Avg Env model step ms: {np.mean(self.time['env_model_step_time']) * 1000:.2f}\n"
+                  f"Avg Env model observe ms: {np.mean(self.time['env_model_observe_time']) * 1000:.2f}\n"
+                  f"Sim ms: {self.time['sim_time'] * 1000:.2f}\n"
+                  f"Compute reward ms: {self.time['compute_reward_time'] * 1000:.2f}")
+        self.time = {
+            "env_model_step_time": [],
+            "env_model_observe_time": [],
+            "sim_time": 0.0,
+            "compute_reward_time": 0.0,
+        }
 
     @override(VectorEnv)
     def reset_at(self, index: Optional[int] = None):
@@ -67,6 +86,7 @@ class VoxcraftSingleRewardBaseEnvironmentForVecEnvModel(VectorEnv):
             if len(self.reset_envs) == self.num_envs:
                 self.vec_env_model.reset()
                 self.reset_envs.clear()
+                self.print_and_reset_time()
         return self.vec_env_model.initial_observation_after_reset_single_env
 
     @override(VectorEnv)
@@ -79,6 +99,7 @@ class VoxcraftSingleRewardBaseEnvironmentForVecEnvModel(VectorEnv):
         self.end_rewards = [0 for _ in range(self.num_envs)]
         self.end_robots = ["\n" for _ in range(self.num_envs)]
         self.end_records = ["" for _ in range(self.num_envs)]
+        self.print_and_reset_time()
         return self.vec_env_model.observe()
 
     @override(VectorEnv)
@@ -86,19 +107,26 @@ class VoxcraftSingleRewardBaseEnvironmentForVecEnvModel(VectorEnv):
         before_finished = self.vec_env_model.is_finished() or (
             self.vec_env_model.steps == self.max_steps
         )
+        begin = time()
         if not before_finished:
             self.vec_env_model.step(actions)
         after_finished = self.vec_env_model.is_finished() or (
             self.vec_env_model.steps == self.max_steps
         )
-
+        env_model_step_time = time() - begin
         if not before_finished and after_finished:
             self.update_rewards()
+
+        begin = time()
+        obs = self.vec_env_model.observe()
+        env_model_observe_time = time() - begin
+        self.time["env_model_step_time"].append(env_model_step_time)
+        self.time["env_model_observe_time"].append(env_model_observe_time)
 
         # print(actions)
         # print([f"{r:.3f}" for r in reward_signals])
         return (
-            self.vec_env_model.observe(),
+            obs,
             self.end_rewards
             if not before_finished and after_finished
             else [0] * self.num_envs,
@@ -110,7 +138,11 @@ class VoxcraftSingleRewardBaseEnvironmentForVecEnvModel(VectorEnv):
         """
         Update rewards of all sub environments.
         """
+        begin = time()
         robots, (results, records) = self.run_simulations()
+        sim_time = time() - begin
+
+        begin = time()
         all_start_pos, all_end_pos = [], []
         all_start_com, all_end_com = [], []
         for result in results:
@@ -137,8 +169,12 @@ class VoxcraftSingleRewardBaseEnvironmentForVecEnvModel(VectorEnv):
             all_end_com,
             self.vec_env_model.get_robots_voxels(),
         )
+        compute_reward_time = time() - begin
+
         self.end_robots = robots
         self.end_records = records
+        self.time["sim_time"] = sim_time
+        self.time["compute_reward_time"] = compute_reward_time
 
     def run_simulations(self):
         """
