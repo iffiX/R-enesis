@@ -16,10 +16,6 @@ from renesis.utils.metrics import (
 )
 from renesis.utils.debug import enable_debugger
 from renesis.env_model.base import BaseModel
-from renesis.env_model.cppn import (
-    CPPNBinaryTreeModel,
-    CPPNBinaryTreeWithPhaseOffsetModel,
-)
 from renesis.env_model.gmm import (
     GMMModel,
     GMMObserveWithVoxelModel,
@@ -30,7 +26,6 @@ from renesis.env_model.gmm import (
     time_observe_wrapper,
 )
 from renesis.env_model.patch import PatchModel, PatchSphereModel
-from renesis.env_model.growth import GrowthModel
 from renesis.utils.metrics import get_surface_area, get_volume, get_bounding_box_sizes
 
 
@@ -241,73 +236,6 @@ class VoxcraftBaseEnvironment(VectorEnv):
     def render(self, mode="ansi"):
         if mode == "ansi":
             return self.robot[0] + "\n"
-
-
-class VoxcraftGrowthEnvironment(VoxcraftBaseEnvironment):
-    def __init__(self, config):
-        if config.get("debug", False):
-            enable_debugger(
-                config.get("debug_ip", "localhost"), config.get("debug_port", 8223)
-            )
-        env_models = [
-            GrowthModel(
-                materials=config["materials"],
-                max_dimension_size=config["max_dimension_size"],
-                max_view_size=config["max_view_size"],
-                actuation_features=config["actuation_features"],
-                amplitude_range=config["amplitude_range"],
-                frequency_range=config["frequency_range"],
-                phase_offset_range=config["phase_offset_range"],
-            )
-            for _ in range(config["num_envs"])
-        ]
-        super().__init__(config, env_models)
-
-
-class VoxcraftCPPNBinaryTreeEnvironment(VoxcraftBaseEnvironment):
-    def __init__(self, config):
-        self.initial_max_random_steps = config.get("initial_max_random_steps", 0)
-        if config.get("debug", False):
-            enable_debugger(
-                config.get("debug_ip", "localhost"), config.get("debug_port", 8223)
-            )
-        env_models = [
-            CPPNBinaryTreeModel(
-                dimension_size=config["dimension_size"],
-                cppn_hidden_node_num=config["cppn_hidden_node_num"],
-            )
-            for _ in range(config["num_envs"])
-        ]
-        super().__init__(config, env_models)
-
-    # def get_rewards(self, all_finished):
-    #     base_rewards = super().get_rewards(all_finished)
-    #     for idx, model in enumerate(self.env_models):
-    #         base_rewards[idx] += model.get_cppn_reward()
-    #     return base_rewards
-
-
-class VoxcraftCPPNBinaryTreeWithPhaseOffsetEnvironment(VoxcraftBaseEnvironment):
-    def __init__(self, config):
-        self.initial_max_random_steps = config.get("initial_max_random_steps", 0)
-        if config.get("debug", False):
-            enable_debugger(
-                config.get("debug_ip", "localhost"), config.get("debug_port", 8223)
-            )
-        env_models = [
-            CPPNBinaryTreeWithPhaseOffsetModel(
-                dimension_size=config["dimension_size"],
-                cppn_hidden_node_num=config["cppn_hidden_node_num"],
-            )
-            for _ in range(config["num_envs"])
-        ]
-        super().__init__(config, env_models)
-
-    # def get_rewards(self, all_finished):
-    #     base_rewards = super().get_rewards(all_finished)
-    #     for idx, model in enumerate(self.env_models):
-    #         base_rewards[idx] += model.get_cppn_reward()
-    #     return base_rewards
 
 
 class VoxcraftGMMEnvironment(VoxcraftBaseEnvironment):

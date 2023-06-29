@@ -30,7 +30,7 @@ class ShapeBaseEnvironmentForVecEnvModel(VectorEnv):
         super().__init__(self.observation_space, self.action_space, config["num_envs"])
 
     @override(VectorEnv)
-    def reset_at(self, index: Optional[int] = None):
+    def reset_at(self, index: Optional[int] = None, *args, **kwargs):
         # Will reset all models at end
         self.end_rewards[index] = 0
         if index in self.reset_envs:
@@ -40,7 +40,7 @@ class ShapeBaseEnvironmentForVecEnvModel(VectorEnv):
             if len(self.reset_envs) == self.num_envs:
                 self.vec_env_model.reset()
                 self.reset_envs.clear()
-        return self.vec_env_model.initial_observation_after_reset_single_env
+        return self.vec_env_model.initial_observation_after_reset_single_env, None
 
     @override(VectorEnv)
     def restart_at(self, index: Optional[int] = None):
@@ -50,7 +50,7 @@ class ShapeBaseEnvironmentForVecEnvModel(VectorEnv):
     def vector_reset(self):
         self.vec_env_model.reset()
         self.end_rewards = [0 for _ in range(self.num_envs)]
-        return self.vec_env_model.observe()
+        return self.vec_env_model.observe(), [{} for _ in range(self.num_envs)]
 
     @override(VectorEnv)
     def vector_step(self, actions):
@@ -74,6 +74,7 @@ class ShapeBaseEnvironmentForVecEnvModel(VectorEnv):
             if not before_finished and after_finished
             else [0] * self.num_envs,
             [after_finished] * self.num_envs,
+            [False for _ in range(self.num_envs)],
             [{} for _ in range(self.num_envs)],
         )
 

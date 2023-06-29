@@ -1,7 +1,7 @@
 import torch as t
 import numpy as np
 from typing import List
-from gym.spaces import Box
+from gymnasium.spaces import Box
 from multiprocessing.pool import Pool
 from .base import BaseVectorizedModel
 from .gmm import is_voxel_continuous, normalize

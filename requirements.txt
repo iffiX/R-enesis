@@ -5,7 +5,7 @@ imageio-ffmpeg==0.4.7
 moviepy==1.0.3
 numpy==1.23.4
 Pillow==9.2.0
-ray[rllib]~=2.0.1
+ray[rllib]~=2.5.1
 pytorch_lightning==2.0
 scipy==1.9.3
 scikit-learn
@@ -25,3 +25,4 @@ psutil~=5.9.3
 h5py
 seaborn
 dill
+gymnasium

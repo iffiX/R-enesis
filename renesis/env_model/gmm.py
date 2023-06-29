@@ -2,7 +2,7 @@ import cc3d
 import numpy as np
 from typing import List, Union
 from collections import OrderedDict
-from gym.spaces import Box, Dict
+from gymnasium.spaces import Box, Dict
 from scipy.stats import multivariate_normal
 from .base import BaseModel
 

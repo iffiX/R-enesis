@@ -74,7 +74,7 @@ class VoxcraftSingleRewardBaseEnvironmentForVecEnvModel(VectorEnv):
         }
 
     @override(VectorEnv)
-    def reset_at(self, index: Optional[int] = None):
+    def reset_at(self, index: Optional[int] = None, *args, **kwargs):
         # Will reset all models at end
         self.end_rewards[index] = 0
         self.end_robots[index] = "\n"
@@ -87,7 +87,7 @@ class VoxcraftSingleRewardBaseEnvironmentForVecEnvModel(VectorEnv):
                 self.vec_env_model.reset()
                 self.reset_envs.clear()
                 self.print_and_reset_time()
-        return self.vec_env_model.initial_observation_after_reset_single_env
+        return self.vec_env_model.initial_observation_after_reset_single_env, None
 
     @override(VectorEnv)
     def restart_at(self, index: Optional[int] = None):
@@ -100,7 +100,7 @@ class VoxcraftSingleRewardBaseEnvironmentForVecEnvModel(VectorEnv):
         self.end_robots = ["\n" for _ in range(self.num_envs)]
         self.end_records = ["" for _ in range(self.num_envs)]
         self.print_and_reset_time()
-        return self.vec_env_model.observe()
+        return self.vec_env_model.observe(), [{} for _ in range(self.num_envs)]
 
     @override(VectorEnv)
     def vector_step(self, actions):
@@ -131,6 +131,7 @@ class VoxcraftSingleRewardBaseEnvironmentForVecEnvModel(VectorEnv):
             if not before_finished and after_finished
             else [0] * self.num_envs,
             [after_finished] * self.num_envs,
+            [False for _ in range(self.num_envs)],
             [{} for _ in range(self.num_envs)],
         )
 
@@ -147,16 +148,22 @@ class VoxcraftSingleRewardBaseEnvironmentForVecEnvModel(VectorEnv):
         all_start_com, all_end_com = [], []
         for result in results:
             if result is not None:
-                start_pos, end_pos = get_voxel_positions(
-                    result, voxel_size=self.voxel_size
-                )
-                start_com, end_com = get_center_of_mass(
-                    result, voxel_size=self.voxel_size
-                )
-                all_start_pos.append(start_pos)
-                all_end_pos.append(end_pos)
-                all_start_com.append(start_com)
-                all_end_com.append(end_com)
+                try:
+                    start_pos, end_pos = get_voxel_positions(
+                        result, voxel_size=self.voxel_size
+                    )
+                    start_com, end_com = get_center_of_mass(
+                        result, voxel_size=self.voxel_size
+                    )
+                    all_start_pos.append(start_pos)
+                    all_end_pos.append(end_pos)
+                    all_start_com.append(start_com)
+                    all_end_com.append(end_com)
+                except:
+                    all_start_pos.append(None)
+                    all_end_pos.append(None)
+                    all_start_com.append(None)
+                    all_end_com.append(None)
             else:
                 all_start_pos.append(None)
                 all_end_pos.append(None)

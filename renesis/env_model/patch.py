@@ -1,7 +1,7 @@
 import cc3d
 import numpy as np
 from typing import List
-from gym.spaces import Box
+from gymnasium.spaces import Box
 from .base import BaseModel
 from .gmm import is_voxel_continuous, normalize
 from renesis.utils.robot import get_robot_voxels_from_voxels

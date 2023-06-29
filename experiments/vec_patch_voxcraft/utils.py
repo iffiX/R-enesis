@@ -5,6 +5,7 @@ import numpy as np
 import torch as t
 from ray.tune.logger import LoggerCallback
 from ray.tune.result import TIMESTEPS_TOTAL, TRAINING_ITERATION
+from ray.rllib.policy.sample_batch import SampleBatch
 from ray.rllib.algorithms.callbacks import DefaultCallbacks
 from launch.snapshot import get_snapshot
 
@@ -21,37 +22,27 @@ class CustomCallbacks(DefaultCallbacks):
             "voxels": None,
         }
 
-    def on_episode_step(
+    def on_postprocess_trajectory(
         self,
         *,
         worker,
-        base_env,
-        policies,
         episode,
+        agent_id,
+        policy_id,
+        policies,
+        postprocessed_batch: SampleBatch,
+        original_batches,
         **kwargs,
     ) -> None:
-        episode.media["episode_data"]["step_dists"].append(
-            episode.last_extra_action_outs_for()["action_dist_inputs"]
-        )
-        episode.media["episode_data"]["steps"].append(episode.last_action_for())
+        episode.media["episode_data"]["step_dists"] = postprocessed_batch[SampleBatch.ACTION_DIST_INPUTS]
+        episode.media["episode_data"]["steps"] = postprocessed_batch[SampleBatch.ACTIONS]
 
-    def on_episode_end(
-        self,
-        *,
-        worker,
-        base_env,
-        policies,
-        episode,
-        env_index,
-        **kwargs,
-    ):
+    def on_episode_end(self, *, worker, base_env, policies, episode, env_index, **kwargs):
         # Check if there are multiple episodes in a batch, i.e.
         # "batch_mode": "truncate_episodes".
         if worker.policy_config["batch_mode"] == "truncate_episodes":
             # Make sure this episode is really done.
-            assert episode.batch_builder.policy_collectors["default_policy"].batches[
-                -1
-            ]["dones"][-1], (
+            assert base_env.vector_env.vec_env_model.is_finished(), (
                 "ERROR: `on_episode_end()` should only be called "
                 "after episode is done!"
             )
@@ -75,7 +66,6 @@ class CustomCallbacks(DefaultCallbacks):
         *,
         algorithm,
         result,
-        trainer,
         **kwargs,
     ) -> None:
         # Use sampled data from training instead of evaluation to speed up
