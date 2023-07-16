@@ -11,6 +11,7 @@ from launch.snapshot import get_snapshot
 
 t.set_printoptions(threshold=10000)
 
+
 class CustomCallbacks(DefaultCallbacks):
     def on_episode_start(self, *, worker, base_env, policies, episode, **kwargs):
         episode.media["episode_data"] = {
@@ -34,10 +35,16 @@ class CustomCallbacks(DefaultCallbacks):
         original_batches,
         **kwargs,
     ) -> None:
-        episode.media["episode_data"]["step_dists"] = postprocessed_batch[SampleBatch.ACTION_DIST_INPUTS]
-        episode.media["episode_data"]["steps"] = postprocessed_batch[SampleBatch.ACTIONS]
+        episode.media["episode_data"]["step_dists"] = postprocessed_batch[
+            SampleBatch.ACTION_DIST_INPUTS
+        ]
+        episode.media["episode_data"]["steps"] = postprocessed_batch[
+            SampleBatch.ACTIONS
+        ]
 
-    def on_episode_end(self, *, worker, base_env, policies, episode, env_index, **kwargs):
+    def on_episode_end(
+        self, *, worker, base_env, policies, episode, env_index, **kwargs
+    ):
         # Check if there are multiple episodes in a batch, i.e.
         # "batch_mode": "truncate_episodes".
         if worker.policy_config["batch_mode"] == "truncate_episodes":
@@ -81,6 +88,7 @@ class CustomCallbacks(DefaultCallbacks):
         result["episode_media"] = {
             "data": data,
         }
+
 
 class DataLoggerCallback(LoggerCallback):
     def __init__(self, base_config_path):

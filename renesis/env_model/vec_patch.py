@@ -79,9 +79,7 @@ class VectorizedPatchModel(BaseVectorizedModel):
         self.vec_voxels = np.zeros(
             [self.env_num] + self.dimension_size, dtype=np.float32
         )
-        self.vec_occupied = np.zeros(
-            [self.env_num] + self.dimension_size, dtype=bool
-        )
+        self.vec_occupied = np.zeros([self.env_num] + self.dimension_size, dtype=bool)
         self.last_biggest_value = t.zeros(
             [self.env_num, np.prod(self.dimension_size)], device=self.device
         )
@@ -205,8 +203,12 @@ class VectorizedPatchModel(BaseVectorizedModel):
         # because idx starts from 0
         patch_value = (covered * (idx + 1)).to(dtype=t.float32)
         overwrite_idx = patch_value > self.last_biggest_value
-        self.last_biggest_value = t.where(overwrite_idx, patch_value, self.last_biggest_value)
-        self.last_biggest_value_idx = t.where(overwrite_idx, idx, self.last_biggest_value_idx)
+        self.last_biggest_value = t.where(
+            overwrite_idx, patch_value, self.last_biggest_value
+        )
+        self.last_biggest_value_idx = t.where(
+            overwrite_idx, idx, self.last_biggest_value_idx
+        )
 
         vec_voxels = t.zeros(
             [self.env_num] + self.dimension_size, dtype=t.float32, device=self.device
@@ -215,10 +217,7 @@ class VectorizedPatchModel(BaseVectorizedModel):
         # material map shape [env_num, patch_num]
         material_map = t.tensor(
             [
-                [
-                    self.materials[int(mat)]
-                    for mat in np.argmax(patch[:, 3:], axis=1)
-                ]
+                [self.materials[int(mat)] for mat in np.argmax(patch[:, 3:], axis=1)]
                 for patch in self.vec_patches
             ],
             device=self.device,
@@ -276,8 +275,12 @@ class VectorizedPatchSphereModel(VectorizedPatchModel):
         # because idx starts from 0
         patch_value = (covered * (idx + 1)).to(dtype=t.float32)
         overwrite_idx = patch_value > self.last_biggest_value
-        self.last_biggest_value = t.where(overwrite_idx, patch_value, self.last_biggest_value)
-        self.last_biggest_value_idx = t.where(overwrite_idx, idx, self.last_biggest_value_idx)
+        self.last_biggest_value = t.where(
+            overwrite_idx, patch_value, self.last_biggest_value
+        )
+        self.last_biggest_value_idx = t.where(
+            overwrite_idx, idx, self.last_biggest_value_idx
+        )
 
         vec_voxels = t.zeros(
             [self.env_num] + self.dimension_size, dtype=t.float32, device=self.device
@@ -286,10 +289,7 @@ class VectorizedPatchSphereModel(VectorizedPatchModel):
         # material map shape [env_num, patch_num]
         material_map = t.tensor(
             [
-                [
-                    self.materials[int(mat)]
-                    for mat in np.argmax(patch[:, 3:], axis=1)
-                ]
+                [self.materials[int(mat)] for mat in np.argmax(patch[:, 3:], axis=1)]
                 for patch in self.vec_patches
             ],
             device=self.device,

@@ -21,7 +21,7 @@ example_env_model = VectorizedPatchModel(
     patch_size=patch_size,
     max_patch_num=steps,
     env_num=envs,
-    device="cpu"
+    device="cpu",
 )
 config = PPOConfig()
 config.environment(
@@ -46,13 +46,13 @@ config.environment(
     },
     render_env=False,
     disable_env_checking=True,
-    normalize_actions=False
+    normalize_actions=False,
 )
 config.training(
     lr=1e-4,
     gamma=0.99,
     train_batch_size=steps * workers * envs * rollout,
-    vf_clip_param= 10 ** 5,
+    vf_clip_param=10**5,
     sgd_minibatch_size=1024,
     num_sgd_iter=10,
     model={
@@ -66,27 +66,17 @@ config.training(
             "normalize_mode": "clip",
             "initial_std_bias_in_voxels": 0,
         },
-    }
+    },
 )
 config.evaluation(
     evaluation_interval=None,
 )
-config.debugging(
-    seed=145345
-)
+config.debugging(seed=145345)
 config.rollouts(
     num_rollout_workers=workers,
     num_envs_per_worker=envs,
     rollout_fragment_length=steps,
 )
-config.resources(
-    num_gpus=1,
-    num_cpus_per_worker=12,
-    num_gpus_per_worker=1
-)
-config.framework(
-    framework="torch"
-)
-config.callbacks(
-    CustomCallbacks
-)
+config.resources(num_gpus=1, num_cpus_per_worker=12, num_gpus_per_worker=1)
+config.framework(framework="torch")
+config.callbacks(CustomCallbacks)

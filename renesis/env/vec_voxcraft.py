@@ -62,10 +62,12 @@ class VoxcraftSingleRewardBaseEnvironmentForVecEnvModel(VectorEnv):
 
     def print_and_reset_time(self):
         if len(self.time["env_model_step_time"]) > 0:
-            print(f"Avg Env model step ms: {np.mean(self.time['env_model_step_time']) * 1000:.2f}\n"
-                  f"Avg Env model observe ms: {np.mean(self.time['env_model_observe_time']) * 1000:.2f}\n"
-                  f"Sim ms: {self.time['sim_time'] * 1000:.2f}\n"
-                  f"Compute reward ms: {self.time['compute_reward_time'] * 1000:.2f}")
+            print(
+                f"Avg Env model step ms: {np.mean(self.time['env_model_step_time']) * 1000:.2f}\n"
+                f"Avg Env model observe ms: {np.mean(self.time['env_model_observe_time']) * 1000:.2f}\n"
+                f"Sim ms: {self.time['sim_time'] * 1000:.2f}\n"
+                f"Compute reward ms: {self.time['compute_reward_time'] * 1000:.2f}"
+            )
         self.time = {
             "env_model_step_time": [],
             "env_model_observe_time": [],
