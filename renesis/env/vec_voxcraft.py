@@ -26,6 +26,7 @@ from renesis.env_model.vec_patch import (
     VectorizedPatchSphereModel,
     VectorizedPatchFixedPhaseOffsetModel,
     VectorizedPatchWithTimestepsModel,
+    VectorizedDiscretePatchModel,
 )
 from renesis.utils.metrics import get_surface_area, get_volume, get_bounding_box_sizes
 
@@ -62,10 +63,12 @@ class VoxcraftSingleRewardBaseEnvironmentForVecEnvModel(VectorEnv):
 
     def print_and_reset_time(self):
         if len(self.time["env_model_step_time"]) > 0:
-            print(f"Avg Env model step ms: {np.mean(self.time['env_model_step_time']) * 1000:.2f}\n"
-                  f"Avg Env model observe ms: {np.mean(self.time['env_model_observe_time']) * 1000:.2f}\n"
-                  f"Sim ms: {self.time['sim_time'] * 1000:.2f}\n"
-                  f"Compute reward ms: {self.time['compute_reward_time'] * 1000:.2f}")
+            print(
+                f"Avg Env model step ms: {np.mean(self.time['env_model_step_time']) * 1000:.2f}\n"
+                f"Avg Env model observe ms: {np.mean(self.time['env_model_observe_time']) * 1000:.2f}\n"
+                f"Sim ms: {self.time['sim_time'] * 1000:.2f}\n"
+                f"Compute reward ms: {self.time['compute_reward_time'] * 1000:.2f}"
+            )
         self.time = {
             "env_model_step_time": [],
             "env_model_observe_time": [],
@@ -201,43 +204,49 @@ class VoxcraftSingleRewardBaseEnvironmentForVecEnvModel(VectorEnv):
                 continue
             valid_indices.append(idx)
             robots.append(vxd_creator(sizes, representation, record_history=True))
-        begin = time()
-        for attempt in range(3):
-            try:
-                out = self.simulator.run_sims(
-                    [self.base_config] * len(robots), robots, save_record=False
-                )
-                end = time()
-            except Exception as e:
-                print(f"Failed attempt {attempt + 1}")
-                if attempt == 2:
-                    print(f"Final attempt failed")
-                    dump_dir = os.path.expanduser(f"~/renesis_sim_dump/{begin}")
-                    os.makedirs(dump_dir, exist_ok=True)
-                    print(f"Debug info saved to {dump_dir}")
-                    with open(os.path.join(dump_dir, "base.vxa"), "w") as file:
-                        file.write(self.base_config)
-                    for i, robot in enumerate(robots):
-                        with open(os.path.join(dump_dir, f"{i}.vxd"), "w") as file:
-                            file.write(robot)
-                    raise e
-            else:
-                print(
-                    f"{len(robots)} simulations total {end - begin:.3f}s, "
-                    f"average {(end - begin) / len(robots):.3f}s"
-                )
-                all_robots = [None] * self.vec_env_model.env_num
-                all_out = [
-                    [None] * self.vec_env_model.env_num,
-                    [None] * self.vec_env_model.env_num,
-                ]
-                for idx, robot, result, record in zip(
-                    valid_indices, robots, out[0], out[1]
-                ):
-                    all_robots[idx] = robot
-                    all_out[0][idx] = result
-                    all_out[1][idx] = record
-                return all_robots, all_out
+
+        all_robots = [None] * self.vec_env_model.env_num
+        all_out = [
+            [None] * self.vec_env_model.env_num,
+            [None] * self.vec_env_model.env_num,
+        ]
+
+        if len(valid_indices) > 0:
+            begin = time()
+            for attempt in range(3):
+                try:
+                    out = self.simulator.run_sims(
+                        [self.base_config] * len(robots), robots, save_record=False
+                    )
+                    end = time()
+                except Exception as e:
+                    print(f"Failed attempt {attempt + 1}")
+                    if attempt == 2:
+                        print(f"Final attempt failed")
+                        dump_dir = os.path.expanduser(f"~/renesis_sim_dump/{begin}")
+                        os.makedirs(dump_dir, exist_ok=True)
+                        print(f"Debug info saved to {dump_dir}")
+                        with open(os.path.join(dump_dir, "base.vxa"), "w") as file:
+                            file.write(self.base_config)
+                        for i, robot in enumerate(robots):
+                            with open(os.path.join(dump_dir, f"{i}.vxd"), "w") as file:
+                                file.write(robot)
+                        raise e
+                else:
+                    print(
+                        f"{len(robots)} simulations total {end - begin:.3f}s, "
+                        f"average {(end - begin) / len(robots):.3f}s"
+                    )
+                    for idx, robot, result, record in zip(
+                        valid_indices, robots, out[0], out[1]
+                    ):
+                        all_robots[idx] = robot
+                        all_out[0][idx] = result
+                        all_out[1][idx] = record
+                    break
+        else:
+            print("Warning: no valid robot in vectorized batch")
+        return all_robots, all_out
 
     def compute_reward_from_sim_result(
         self, all_start_pos, all_end_pos, all_start_com, all_end_com, all_voxels
@@ -408,3 +417,26 @@ class VoxcraftSingleRewardVectorizedPatchWithTimestepsEnvironment(
         return super().vector_step(
             [normalize(action, mode=normalize_mode) for action in actions]
         )
+
+
+class VoxcraftSingleRewardVectorizedDiscretePatchEnvironment(
+    VoxcraftSingleRewardBaseEnvironmentForVecEnvModel
+):
+    def __init__(self, config):
+        if config.get("debug", False):
+            enable_debugger(
+                config.get("debug_ip", "localhost"), config.get("debug_port", 8223)
+            )
+        super().__init__(
+            config,
+            VectorizedDiscretePatchModel(
+                materials=config["materials"],
+                dimension_size=config["dimension_size"],
+                patch_size=config["patch_size"],
+                max_patch_num=config["max_patch_num"],
+                env_num=config["num_envs"],
+            ),
+        )
+
+    def vector_step(self, actions):
+        return super().vector_step(actions)

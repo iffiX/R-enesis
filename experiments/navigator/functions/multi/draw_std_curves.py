@@ -45,7 +45,9 @@ def compute_std_metrics_for_epoch(epoch_data_file_path):
     ) as file:
         data = pickle.load(file)
         # shape [batch_size, T, (3 + material_num (k)) * 2]
-        all_step_dists = np.array([d["step_dists"] for d in data])
+        all_step_dists = np.array(
+            [d["step_dists"] for d in data if len(d["steps"]) > 0]
+        )
         # return shape: [T, 3 + material_num (k)]
         return np.mean(all_step_dists[:, :, all_step_dists.shape[-1] // 2 :], axis=0)
 

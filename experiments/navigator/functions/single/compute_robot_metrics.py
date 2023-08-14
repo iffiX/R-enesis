@@ -90,21 +90,24 @@ def compute_all_robots_average_metrics(trial_record: TrialRecord, show_epoch: in
         data = pickle.load(file)
 
         for i in range(len(data)):
-            robot_voxels, _ = get_robot_voxels_from_voxels(data[i]["voxels"])
-            metrics["volume"].append(get_volume(robot_voxels))
-            metrics["surface_area"].append(get_surface_area(robot_voxels))
-            metrics["surface_voxels"].append(get_surface_voxels(robot_voxels))
-            metrics["surface_area_to_total_volume_ratio"].append(
-                (metrics["surface_area"][-1] / metrics["volume"][-1])
-            )
-            metrics["surface_voxels_to_total_volume_ratio"].append(
-                (metrics["surface_voxels"][-1] / metrics["volume"][-1])
-            )
-            metrics["section_num"].append(get_section_num(robot_voxels))
-            metrics["reflection_symmetry"].append(get_reflection_symmetry(robot_voxels))
-            metrics["gzip_compressed_ratio"].append(
-                get_gzip_compressed_ratio(robot_voxels)
-            )
+            if len(data["steps"]) > 0:
+                robot_voxels, _ = get_robot_voxels_from_voxels(data[i]["voxels"])
+                metrics["volume"].append(get_volume(robot_voxels))
+                metrics["surface_area"].append(get_surface_area(robot_voxels))
+                metrics["surface_voxels"].append(get_surface_voxels(robot_voxels))
+                metrics["surface_area_to_total_volume_ratio"].append(
+                    (metrics["surface_area"][-1] / metrics["volume"][-1])
+                )
+                metrics["surface_voxels_to_total_volume_ratio"].append(
+                    (metrics["surface_voxels"][-1] / metrics["volume"][-1])
+                )
+                metrics["section_num"].append(get_section_num(robot_voxels))
+                metrics["reflection_symmetry"].append(
+                    get_reflection_symmetry(robot_voxels)
+                )
+                metrics["gzip_compressed_ratio"].append(
+                    get_gzip_compressed_ratio(robot_voxels)
+                )
         for key, values in metrics.items():
             metrics[key] = np.mean(values)
         pprint.pprint(metrics)

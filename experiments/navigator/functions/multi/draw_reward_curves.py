@@ -43,7 +43,7 @@ def compute_reward_metrics_for_epoch(epoch_data_file_path):
         "rb",
     ) as file:
         data = pickle.load(file)
-        rewards = np.array([d["reward"] for d in data])
+        rewards = np.array([d["reward"] for d in data if len(d["steps"]) > 0])
         return (
             np.max(rewards),
             np.min(rewards),
@@ -109,7 +109,7 @@ def draw_separate_reward_curves(records: List[TrialRecord]):
         metrics = generate_reward_metrics_for_trial(record)
         for epoch in truncated_epochs:
             # mean
-            reward_curves[record_idx, epoch - 1] = metrics[epoch][2]
+            reward_curves[record_idx, epoch - 1] = metrics[epoch][0]
         plt.plot(
             truncated_epochs,
             smooth(reward_curves[record_idx, :]),

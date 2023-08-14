@@ -48,7 +48,11 @@ def compute_robot_distance_metrics_for_epoch(epoch_data_file_path):
     ) as file:
         data = pickle.load(file)
         robots_voxels = np.array(
-            [get_robot_voxels_from_voxels(d["voxels"])[0].reshape(-1) for d in data]
+            [
+                get_robot_voxels_from_voxels(d["voxels"])[0].reshape(-1)
+                for d in data
+                if len(d["steps"]) > 0
+            ]
         )
         pairwise_l0_distance = np.linalg.norm(
             robots_voxels[:, None, :] - robots_voxels[None, :, :], ord=0, axis=-1

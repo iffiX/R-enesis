@@ -39,13 +39,10 @@ class VectorizedPatchModel(BaseVectorizedModel):
         self.vec_prev_voxels = np.zeros([env_num] + dimension_size, dtype=np.float32)
         self.vec_voxels = np.zeros([env_num] + dimension_size, dtype=np.float32)
         self.vec_occupied = np.zeros([env_num] + dimension_size, dtype=bool)
+        self.vec_robot_voxels = np.zeros([env_num] + dimension_size, dtype=np.float32)
+        self.vec_robot_occupied = np.zeros([env_num] + dimension_size, dtype=bool)
         self.last_biggest_value = t.zeros(
             [self.env_num, np.prod(self.dimension_size)], device=self.device
-        )
-        self.last_biggest_value_idx = t.zeros(
-            [self.env_num, np.prod(self.dimension_size)],
-            device=self.device,
-            dtype=t.int64,
         )
         self.pool = Pool()
 
@@ -79,16 +76,15 @@ class VectorizedPatchModel(BaseVectorizedModel):
         self.vec_voxels = np.zeros(
             [self.env_num] + self.dimension_size, dtype=np.float32
         )
-        self.vec_occupied = np.zeros(
+        self.vec_occupied = np.zeros([self.env_num] + self.dimension_size, dtype=bool)
+        self.vec_robot_voxels = np.zeros(
+            [self.env_num] + self.dimension_size, dtype=np.float32
+        )
+        self.vec_robot_occupied = np.zeros(
             [self.env_num] + self.dimension_size, dtype=bool
         )
         self.last_biggest_value = t.zeros(
             [self.env_num, np.prod(self.dimension_size)], device=self.device
-        )
-        self.last_biggest_value_idx = t.zeros(
-            [self.env_num, np.prod(self.dimension_size)],
-            device=self.device,
-            dtype=t.int64,
         )
 
     def is_finished(self):
@@ -106,13 +102,13 @@ class VectorizedPatchModel(BaseVectorizedModel):
     def get_robots(self):
         result = self.pool.map(
             self.get_robots_worker,
-            list(zip(self.vec_voxels, self.vec_occupied)),
+            list(zip(self.vec_robot_voxels, self.vec_robot_occupied)),
         )
         return result
 
     @staticmethod
     def get_robots_worker(args):
-        robot_voxels, robot_occupied = get_robot_voxels_from_voxels(*args)
+        robot_voxels, robot_occupied = args
         if not np.any(robot_occupied):
             return (0, 0, 0), []
         x_occupied = [
@@ -146,14 +142,10 @@ class VectorizedPatchModel(BaseVectorizedModel):
         return (max_x - min_x, max_y - min_y, max_z - min_z), representation
 
     def get_robots_voxels(self):
-        result = self.pool.starmap(
-            get_robot_voxels_from_voxels,
-            list(zip(self.vec_voxels, self.vec_occupied)),
-        )
-        return [res[0] for res in result]
+        return [rv for rv in self.vec_robot_voxels]
 
     def get_voxels(self):
-        return [v for v in self.vec_voxels.cpu().numpy()]
+        return [v for v in self.vec_voxels]
 
     def scale(self, action):
         min_value = [-offset for offset in self.center_voxel_offset]
@@ -205,40 +197,46 @@ class VectorizedPatchModel(BaseVectorizedModel):
         # because idx starts from 0
         patch_value = (covered * (idx + 1)).to(dtype=t.float32)
         overwrite_idx = patch_value > self.last_biggest_value
-        self.last_biggest_value = t.where(overwrite_idx, patch_value, self.last_biggest_value)
-        self.last_biggest_value_idx = t.where(overwrite_idx, idx, self.last_biggest_value_idx)
-
-        vec_voxels = t.zeros(
-            [self.env_num] + self.dimension_size, dtype=t.float32, device=self.device
+        self.last_biggest_value = t.where(
+            overwrite_idx, patch_value, self.last_biggest_value
         )
 
-        # material map shape [env_num, patch_num]
-        material_map = t.tensor(
-            [
-                [
-                    self.materials[int(mat)]
-                    for mat in np.argmax(patch[:, 3:], axis=1)
-                ]
-                for patch in self.vec_patches
-            ],
+        modify_voxels = t.full(
+            [self.env_num] + self.dimension_size,
+            -1,
+            dtype=t.float32,
             device=self.device,
-        ).transpose(1, 0)
-        # material shape [env_num, coord_num]
-        material = t.where(
-            self.last_biggest_value > 0,
-            t.gather(input=material_map, dim=1, index=self.last_biggest_value_idx),
-            0,
         )
 
-        vec_voxels[
+        # material map shape [env_num, 1]
+        material_map = t.tensor(
+            [self.materials[int(mat)] for mat in t.argmax(patch[:, 3:], dim=1)],
+            device=self.device,
+        ).unsqueeze(1)
+        # material shape [env_num, coord_num]
+        modify_material = t.where(
+            overwrite_idx,
+            material_map,
+            -1,
+        )
+
+        modify_voxels[
             t.arange(0, self.env_num, dtype=t.long).unsqueeze(1),
             (coords[:, :, 0] + self.center_voxel_offset[0]),
             (coords[:, :, 1] + self.center_voxel_offset[1]),
             (coords[:, :, 2] + self.center_voxel_offset[2]),
-        ] = material.to(dtype=t.float32)
+        ] = modify_material.to(dtype=t.float32)
 
-        self.vec_voxels = vec_voxels.cpu().numpy()
-        self.vec_occupied = (vec_voxels != 0).cpu().numpy()
+        old_vec_voxels = t.from_numpy(self.vec_voxels).to(device=self.device)
+        new_vec_voxels = t.where(modify_voxels != -1, modify_voxels, old_vec_voxels)
+        self.vec_voxels = new_vec_voxels.cpu().numpy()
+        self.vec_occupied = (new_vec_voxels != 0).cpu().numpy()
+        result = self.pool.starmap(
+            get_robot_voxels_from_voxels,
+            list(zip(self.vec_voxels, self.vec_occupied)),
+        )
+        self.vec_robot_voxels = np.array([res[0] for res in result])
+        self.vec_robot_occupied = np.array([res[1] for res in result])
 
 
 class VectorizedPatchSphereModel(VectorizedPatchModel):
@@ -276,40 +274,46 @@ class VectorizedPatchSphereModel(VectorizedPatchModel):
         # because idx starts from 0
         patch_value = (covered * (idx + 1)).to(dtype=t.float32)
         overwrite_idx = patch_value > self.last_biggest_value
-        self.last_biggest_value = t.where(overwrite_idx, patch_value, self.last_biggest_value)
-        self.last_biggest_value_idx = t.where(overwrite_idx, idx, self.last_biggest_value_idx)
-
-        vec_voxels = t.zeros(
-            [self.env_num] + self.dimension_size, dtype=t.float32, device=self.device
+        self.last_biggest_value = t.where(
+            overwrite_idx, patch_value, self.last_biggest_value
         )
 
-        # material map shape [env_num, patch_num]
-        material_map = t.tensor(
-            [
-                [
-                    self.materials[int(mat)]
-                    for mat in np.argmax(patch[:, 3:], axis=1)
-                ]
-                for patch in self.vec_patches
-            ],
+        modify_voxels = t.full(
+            [self.env_num] + self.dimension_size,
+            -1,
+            dtype=t.float32,
             device=self.device,
-        ).transpose(1, 0)
-        # material shape [env_num, coord_num]
-        material = t.where(
-            self.last_biggest_value > 0,
-            t.gather(input=material_map, dim=1, index=self.last_biggest_value_idx),
-            0,
         )
 
-        vec_voxels[
+        # material map shape [env_num, 1]
+        material_map = t.tensor(
+            [self.materials[int(mat)] for mat in t.argmax(patch[:, 3:], dim=1)],
+            device=self.device,
+        ).unsqueeze(1)
+        # material shape [env_num, coord_num]
+        modify_material = t.where(
+            overwrite_idx,
+            material_map,
+            -1,
+        )
+
+        modify_voxels[
             t.arange(0, self.env_num, dtype=t.long).unsqueeze(1),
             (coords[:, :, 0] + self.center_voxel_offset[0]),
             (coords[:, :, 1] + self.center_voxel_offset[1]),
             (coords[:, :, 2] + self.center_voxel_offset[2]),
-        ] = material.to(dtype=t.float32)
+        ] = modify_material.to(dtype=t.float32)
 
-        self.vec_voxels = vec_voxels.cpu().numpy()
-        self.vec_occupied = (vec_voxels != 0).cpu().numpy()
+        old_vec_voxels = t.from_numpy(self.vec_voxels).to(device=self.device)
+        new_vec_voxels = t.where(modify_voxels != -1, modify_voxels, old_vec_voxels)
+        self.vec_voxels = new_vec_voxels.cpu().numpy()
+        self.vec_occupied = (new_vec_voxels != 0).cpu().numpy()
+        result = self.pool.starmap(
+            get_robot_voxels_from_voxels,
+            list(zip(self.vec_voxels, self.vec_occupied)),
+        )
+        self.vec_robot_voxels = np.array([res[0] for res in result])
+        self.vec_robot_occupied = np.array([res[1] for res in result])
 
 
 class VectorizedPatchFixedPhaseOffsetModel(VectorizedPatchModel):
@@ -332,7 +336,7 @@ class VectorizedPatchFixedPhaseOffsetModel(VectorizedPatchModel):
 
     @staticmethod
     def get_robots_worker(args):
-        robot_voxels, robot_occupied = get_robot_voxels_from_voxels(*args)
+        robot_voxels, robot_occupied = args
         # create the 3-D phase offset tensor spanning along the x axis
         phase_offsets = (
             np.linspace(0, np.pi, num=robot_voxels.shape[0])[:, np.newaxis, np.newaxis]
@@ -422,3 +426,45 @@ class VectorizedPatchWithTimestepsModel(VectorizedPatchModel):
             np.concatenate([np.array([self.timestep], dtype=obs.dtype), obs])
             for obs in all_obs
         ]
+
+
+class VectorizedDiscretePatchModel(VectorizedPatchModel):
+    def __init__(
+        self,
+        materials=(0, 1, 2),
+        dimension_size=(20, 20, 20),
+        patch_size=1,
+        max_patch_num=100,
+        env_num=100,
+        device=None,
+    ):
+        super().__init__(
+            materials=materials,
+            dimension_size=dimension_size,
+            patch_size=patch_size,
+            max_patch_num=max_patch_num,
+            env_num=env_num,
+            device=device,
+        )
+        self.timestep = 0
+
+    @property
+    def action_space(self):
+        return Box(
+            low=np.array([0, 0, 0, 0], dtype=np.float32),
+            high=np.array(
+                self.dimension_size + [len(self.materials)], dtype=np.float32
+            ),
+        )
+
+    def scale(self, action):
+        result = []
+        for sub_action in action:
+            sub_action = sub_action.astype(np.int64)
+            material = [0] * len(self.materials)
+            material[sub_action[-1]] = 1
+            result.append(
+                [float(sub_action[i]) - self.center_voxel_offset[i] for i in range(3)]
+                + material
+            )
+        return np.array(result)

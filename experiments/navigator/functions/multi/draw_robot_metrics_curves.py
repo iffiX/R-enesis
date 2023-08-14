@@ -89,22 +89,26 @@ def compute_metrics_for_epoch(epoch_data_file_path):
 
 
 def compute_metrics_for_robot(robot_data):
-    robot_voxels, _ = get_robot_voxels_from_voxels(robot_data["voxels"])
-    volume = get_volume(robot_voxels)
-    surface_area = get_surface_area(robot_voxels)
-    surface_voxels = get_surface_voxels(robot_voxels)
-    return (
-        volume,
-        surface_area,
-        surface_voxels,
-        surface_area / volume,
-        surface_voxels / volume,
-        get_section_num(robot_voxels),
-        get_reflection_symmetry(robot_voxels),
-        get_gzip_compressed_ratio(robot_voxels),
-        get_passive_material_ratio(robot_voxels),
-        get_volume(robot_voxels) / get_volume(robot_data["voxels"]),
-    )
+    if len(robot_data["steps"]) > 0:
+        robot_voxels, _ = get_robot_voxels_from_voxels(robot_data["voxels"])
+        volume = get_volume(robot_voxels)
+        surface_area = get_surface_area(robot_voxels)
+        surface_voxels = get_surface_voxels(robot_voxels)
+
+        return (
+            volume,
+            surface_area,
+            surface_voxels,
+            surface_area / volume,
+            surface_voxels / volume,
+            get_section_num(robot_voxels),
+            get_reflection_symmetry(robot_voxels),
+            get_gzip_compressed_ratio(robot_voxels),
+            get_passive_material_ratio(robot_voxels),
+            get_volume(robot_voxels) / get_volume(robot_data["voxels"]),
+        )
+    else:
+        return (np.nan,) * 10
 
 
 def draw_robot_metric_curves(records: List[TrialRecord]):
