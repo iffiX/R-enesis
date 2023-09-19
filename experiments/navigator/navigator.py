@@ -31,7 +31,6 @@ from experiments.navigator.functions.multi.draw_robot_metrics_curves import (
 from experiments.navigator.functions.multi.draw_reward_curves import (
     draw_reward_curve,
     draw_separate_reward_curves,
-    draw_separate_reward_curves_with_batch_std,
 )
 from experiments.navigator.functions.multi.draw_std_curves import draw_std_curves
 from experiments.navigator.functions.multi.draw_robot_distance_curves import (
@@ -133,19 +132,6 @@ if __name__ == "__main__":
                         PromptExecutableWithMultipleChoice(
                             description="Draw separate reward curves",
                             execute=draw_separate_reward_curves,
-                            choices=[
-                                (
-                                    f"{trial_record.trial_dir}\n"
-                                    f"    comment: {' '.join(trial_record.comment)}\n"
-                                    f"    reward: {trial_record.max_reward:.3f}",
-                                    trial_record,
-                                )
-                                for trial_record in all_trial_records
-                            ],
-                        ),
-                        PromptExecutableWithMultipleChoice(
-                            description="Draw separate reward curves with batch std",
-                            execute=draw_separate_reward_curves_with_batch_std,
                             choices=[
                                 (
                                     f"{trial_record.trial_dir}\n"

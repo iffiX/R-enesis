@@ -62,7 +62,7 @@ def generate_robot_metrics_for_trial(record: TrialRecord):
         ]
         results = list(
             tqdm.tqdm(
-                pool.imap(compute_metrics_for_epoch, epoch_data_file_paths),
+                pool.imap(generate_metrics_for_epoch, epoch_data_file_paths),
                 total=len(epoch_data_file_paths),
             )
         )
@@ -74,21 +74,21 @@ def generate_robot_metrics_for_trial(record: TrialRecord):
         return metrics
 
 
-def compute_metrics_for_epoch(epoch_data_file_path):
+def generate_metrics_for_epoch(epoch_data_file_path):
     metrics = {}
     with open(
         epoch_data_file_path,
         "rb",
     ) as file:
         data = pickle.load(file)
-        results = np.array(list(map(compute_metrics_for_robot, data))).transpose()
+        results = np.array(list(map(generate_metrics_for_robot, data))).transpose()
         for key, result in zip(_robot_metrics_keys, results):
             value = np.nanmean(result)
             metrics[key] = value if not np.isnan(value) else 0
     return metrics
 
 
-def compute_metrics_for_robot(robot_data):
+def generate_metrics_for_robot(robot_data):
     if len(robot_data["steps"]) > 0:
         robot_voxels, _ = get_robot_voxels_from_voxels(robot_data["voxels"])
         volume = get_volume(robot_voxels)
@@ -112,6 +112,9 @@ def compute_metrics_for_robot(robot_data):
 
 
 def draw_robot_metric_curves(records: List[TrialRecord]):
+    # since generated model may vary greatly from trial to trial
+    # instead of combining all robots together and compute metric mean and std
+    # we first compute mean and std value for each trial, then average across trials
     truncated_epochs = list(range(1, min(record.epochs[-1] for record in records) + 1))
     row_size = (len(_show_robot_metrics_keys) + 2) // 3
     col_size = 3

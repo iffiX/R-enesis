@@ -8,7 +8,7 @@ from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 from renesis.utils.robot import get_robot_voxels_from_voxels
 from experiments.navigator.trial import TrialRecord
 from experiments.navigator.functions.multi.draw_reward_curves import (
-    generate_reward_metrics_for_trial,
+    generate_rewards_for_trial,
     smooth,
 )
 from experiments.navigator.functions.multi.draw_robot_metrics_curves import (
@@ -17,144 +17,22 @@ from experiments.navigator.functions.multi.draw_robot_metrics_curves import (
 )
 
 
-# def draw_voxcraft_task_result(
-#     records: List[TrialRecord],
-# ):
-#     fig, axs = plt.subplots(2, 3, figsize=(12, 6), layout="constrained")
-#
-#     truncated_epochs = list(range(1, min(record.epochs[-1] for record in records) + 1))
-#     reward_curves = np.zeros([len(records), len(truncated_epochs)])
-#     print(f"show epoch num: {truncated_epochs[-1]}")
-#     for record_idx, record in enumerate(records):
-#         metrics = generate_reward_metrics_for_trial(record)
-#         for epoch in truncated_epochs:
-#             # mean
-#             reward_curves[record_idx, epoch - 1] = metrics[epoch][2]
-#     std = np.std(reward_curves, axis=0)
-#     mean = np.mean(reward_curves, axis=0)
-#     shift = std * 2.576 / np.sqrt(len(records))
-#     axs[0][0].fill_between(
-#         truncated_epochs,
-#         mean - shift,
-#         mean + shift,
-#         color="lightgrey",
-#     )
-#     axs[0][0].plot(
-#         truncated_epochs,
-#         smooth(mean),
-#         color="grey",
-#     )
-#     # axs[0][0].set_xlabel("Epoch", fontsize=14)
-#     axs[0][0].set_ylabel("Displacement (voxel length)", fontsize=14)
-#     axs[0][0].set_ylim(0, np.max(mean + shift) * 1.1)
-#     axs[0][0].xaxis.set_tick_params(labelsize=14)
-#     axs[0][0].yaxis.set_tick_params(labelsize=14)
-#     axs[0][0].text(
-#         0.05,
-#         0.95,
-#         "A",
-#         transform=axs[0][0].transAxes,
-#         color="black",
-#         fontsize=15,
-#         verticalalignment="top",
-#     )
-#
-#     for row, col, show_key, ref_label, y_label in (
-#         (0, 1, "volume", "B", "Volume (number of voxels)"),
-#         (0, 2, "passive_material_ratio", "D", "Passive material ratio"),
-#         (1, 0, "section_num", "E", "Substructures"),
-#         (1, 1, "reflection_symmetry", "F", "Reflection symmetry"),
-#         (1, 2, "gzip_compressed_ratio", "G", "Gzip compressed ratio"),
-#     ):
-#         idx = row * 3 + col
-#         if idx < len(_show_robot_metrics_keys):
-#             metric_curves = np.zeros([len(records), len(truncated_epochs)])
-#             for record_idx, record in enumerate(records):
-#                 metrics = generate_robot_metrics_for_trial(record)
-#                 metric_curves[record_idx] = metrics[show_key][: metric_curves.shape[1]]
-#                 # plt.plot(truncated_epochs, reward_curves[record_idx, :])
-#             std = np.std(metric_curves, axis=0)
-#             mean = np.mean(metric_curves, axis=0)
-#             shift = std * 2.576 / np.sqrt(len(records))
-#             axs[row][col].fill_between(
-#                 truncated_epochs,
-#                 mean - shift,
-#                 mean + shift,
-#                 color="lightgrey",
-#             )
-#             axs[row][col].plot(
-#                 truncated_epochs,
-#                 smooth(mean),
-#                 color="grey",
-#             )
-#             axs[row][col].text(
-#                 0.05,
-#                 0.95,
-#                 ref_label,
-#                 transform=axs[row][col].transAxes,
-#                 color="black",
-#                 fontsize=15,
-#                 verticalalignment="top",
-#             )
-#             axs[row][col].set_ylim(0, np.max(mean) * 1.1)
-#             axs[row][col].set_ylabel(y_label, fontsize=14)
-#             if row != 0:
-#                 axs[row][col].set_xlabel("Epoch", fontsize=14)
-#             axs[row][col].xaxis.set_tick_params(labelsize=14)
-#             axs[row][col].yaxis.set_tick_params(labelsize=14)
-#
-#     axin = inset_axes(axs[0][1], width="40%", height="40%", loc=4, borderpad=2)
-#     metric_curves = np.zeros([len(records), len(truncated_epochs)])
-#     for record_idx, record in enumerate(records):
-#         metrics = generate_robot_metrics_for_trial(record)
-#         metric_curves[record_idx] = metrics["surface_voxels_to_total_volume_ratio"][
-#             : metric_curves.shape[1]
-#         ]
-#     std = np.std(metric_curves, axis=0)
-#     mean = np.mean(metric_curves, axis=0)
-#     shift = std * 2.576 / np.sqrt(len(records))
-#     axin.fill_between(
-#         truncated_epochs,
-#         mean - shift,
-#         mean + shift,
-#         color="lightgrey",
-#     )
-#     axin.plot(
-#         truncated_epochs,
-#         smooth(mean),
-#         color="grey",
-#     )
-#     axin.text(
-#         0.8,
-#         0.95,
-#         "C",
-#         transform=axin.transAxes,
-#         color="black",
-#         fontsize=15,
-#         verticalalignment="top",
-#     )
-#     axin.set_ylim(0.8, 1.05)
-#     axin.xaxis.set_tick_params(labelsize=13)
-#     axin.yaxis.set_tick_params(labelsize=13)
-#     fig.align_ylabels(axs)
-#     fig.savefig(
-#         f"generated_data/voxcraft.pdf",
-#         bbox_inches="tight",
-#         pad_inches=0.1,
-#     )
-#     fig.show()
-
-
 def draw_voxcraft_reward(records: List[TrialRecord], truncated_epochs: List[int], ax):
-    reward_curves = np.zeros([len(records), len(truncated_epochs)])
-    for record_idx, record in enumerate(records):
-        metrics = generate_reward_metrics_for_trial(record)
-        for epoch in truncated_epochs:
-            # mean
-            reward_curves[record_idx, epoch - 1] = metrics[epoch][2]
-    std = np.std(reward_curves, axis=0)
-    mean = np.mean(reward_curves, axis=0)
-    shift = std * 2.576 / np.sqrt(len(records))
+    records_rewards = []
+
+    for record in records:
+        records_rewards.append(generate_rewards_for_trial(record))
+
+    mean = np.zeros(len(truncated_epochs))
+    shift = np.zeros(len(truncated_epochs))
+    # Combine same epoch results from multiple trials, and compute mean & std
+    for epoch in truncated_epochs:
+        epoch_rewards = []
+        for record_rewards in records_rewards:
+            epoch_rewards += record_rewards[epoch]
+        mean[epoch - 1] = np.mean(epoch_rewards)
+        shift[epoch - 1] = np.std(epoch_rewards) * 2.576 / np.sqrt(len(epoch_rewards))
+
     ax.fill_between(
         truncated_epochs,
         mean - shift,

@@ -6,7 +6,7 @@ from typing import List
 from renesis.utils.robot import get_robot_voxels_from_voxels
 from experiments.navigator.trial import TrialRecord
 from experiments.navigator.functions.multi.draw_reward_curves import (
-    generate_reward_metrics_for_trial,
+    generate_rewards_for_trial,
     smooth,
 )
 
@@ -37,16 +37,20 @@ def draw_volume_task_result(
     )
 
     truncated_epochs = list(range(1, min(record.epochs[-1] for record in records) + 1))
-    reward_curves = np.zeros([len(records), len(truncated_epochs)])
     print(f"show epoch num: {truncated_epochs[-1]}")
-    for record_idx, record in enumerate(records):
-        metrics = generate_reward_metrics_for_trial(record)
-        for epoch in truncated_epochs:
-            # mean
-            reward_curves[record_idx, epoch - 1] = metrics[epoch][2]
-    std = np.std(reward_curves, axis=0)
-    mean = np.mean(reward_curves, axis=0)
-    shift = std * 2.576 / np.sqrt(len(records))
+    records_rewards = []
+    for record in records:
+        records_rewards.append(generate_rewards_for_trial(record))
+
+    mean = np.zeros(len(truncated_epochs))
+    shift = np.zeros(len(truncated_epochs))
+    # Combine same epoch results from multiple trials, and compute mean & std
+    for epoch in truncated_epochs:
+        epoch_rewards = []
+        for record_rewards in records_rewards:
+            epoch_rewards += record_rewards[epoch]
+        mean[epoch - 1] = np.mean(epoch_rewards)
+        shift[epoch - 1] = np.std(epoch_rewards) * 2.576 / np.sqrt(len(epoch_rewards))
     axd["reward"].fill_between(
         truncated_epochs,
         mean - shift,

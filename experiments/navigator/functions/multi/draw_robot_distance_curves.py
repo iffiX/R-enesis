@@ -29,7 +29,7 @@ def generate_robot_distance_metrics_for_trial(record: TrialRecord):
         results = list(
             tqdm.tqdm(
                 pool.imap(
-                    compute_robot_distance_metrics_for_epoch, epoch_data_file_paths
+                    generate_robot_distance_metrics_for_epoch, epoch_data_file_paths
                 ),
                 total=len(epoch_data_file_paths),
             )
@@ -41,7 +41,7 @@ def generate_robot_distance_metrics_for_trial(record: TrialRecord):
         return metrics
 
 
-def compute_robot_distance_metrics_for_epoch(epoch_data_file_path):
+def generate_robot_distance_metrics_for_epoch(epoch_data_file_path):
     with open(
         epoch_data_file_path,
         "rb",
@@ -69,12 +69,10 @@ def draw_separate_robot_distance_curves(records: List[TrialRecord]):
     truncated_epochs = list(range(1, min(record.epochs[-1] for record in records) + 1))
     robot_distance_curves = np.zeros([len(records), len(truncated_epochs), 3])
     print(f"show epoch num: {truncated_epochs[-1]}")
-    labels = [
-        # "log std bias 1->0",
-        # "log std bias 1->0.25",
-        # "log std bias 1->0.5",
-        "no bias",
-    ]
+    legend_labels = []
+    if input("Add legend labels? [y/n]").lower() == "y":
+        for i in range(len(records)):
+            legend_labels.append(input(f"Label for record {i}:"))
     current_curve_max = -np.inf
     for record_idx, record in enumerate(records):
         metrics = generate_robot_distance_metrics_for_trial(record)
@@ -94,13 +92,14 @@ def draw_separate_robot_distance_curves(records: List[TrialRecord]):
             truncated_epochs,
             smooth(mean),
             color=f"steelblue",
-            label=labels[record_idx],
+            label=legend_labels[record_idx]
+            if legend_labels
+            else f"record {record_idx}",
         )
         current_curve_max = max(np.max(mean + shift), current_curve_max)
 
     plt.ylim(0, np.max(robot_distance_curves) * 1.1)
     plt.ylabel("Average L0 distance")
-    # plt.ylabel("Volume")
     plt.legend()
     plt.xlabel("Epoch")
     plt.title("Average pairwise distances")

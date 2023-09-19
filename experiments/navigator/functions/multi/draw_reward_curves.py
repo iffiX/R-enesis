@@ -9,7 +9,8 @@ from experiments.navigator.trial import TrialRecord
 from experiments.navigator.utils import get_cache_directory
 
 
-def generate_reward_metrics_for_trial(record: TrialRecord):
+def generate_rewards_for_trial(record: TrialRecord):
+    # shape: {epoch_num: [batch_size]}
     metrics = {}
     cache_path = os.path.join(
         get_cache_directory("reward_cache"),
@@ -26,7 +27,7 @@ def generate_reward_metrics_for_trial(record: TrialRecord):
         ]
         results = list(
             tqdm.tqdm(
-                pool.imap(compute_reward_metrics_for_epoch, epoch_data_file_paths),
+                pool.imap(generate_rewards_for_epoch, epoch_data_file_paths),
                 total=len(epoch_data_file_paths),
             )
         )
@@ -37,20 +38,15 @@ def generate_reward_metrics_for_trial(record: TrialRecord):
         return metrics
 
 
-def compute_reward_metrics_for_epoch(epoch_data_file_path):
+def generate_rewards_for_epoch(epoch_data_file_path):
     with open(
         epoch_data_file_path,
         "rb",
     ) as file:
         data = pickle.load(file)
-        rewards = np.array([d["reward"] for d in data if len(d["steps"]) > 0])
-        return (
-            np.max(rewards),
-            np.min(rewards),
-            np.mean(rewards),
-            np.std(rewards),
-            len(rewards),
-        )
+        # shape: [batch_size]
+        rewards = [d["reward"] for d in data if len(d["steps"]) > 0]
+        return rewards
 
 
 def smooth(scalars: np.array, window_size: int = 5) -> np.array:
@@ -65,16 +61,25 @@ def smooth(scalars: np.array, window_size: int = 5) -> np.array:
 
 def draw_reward_curve(records: List[TrialRecord]):
     truncated_epochs = list(range(1, min(record.epochs[-1] for record in records) + 1))
-    reward_curves = np.zeros([len(records), len(truncated_epochs)])
+    records_rewards = []
     print(f"show epoch num: {truncated_epochs[-1]}")
-    for record_idx, record in enumerate(records):
-        metrics = generate_reward_metrics_for_trial(record)
-        for epoch in truncated_epochs:
-            # mean
-            reward_curves[record_idx, epoch - 1] = metrics[epoch][2]
-    std = np.std(reward_curves, axis=0)
-    mean = np.mean(reward_curves, axis=0)
-    shift = std * 2.576 / np.sqrt(len(records))
+    y_label = input('Y label? [default="Travel distance in voxels"]')
+    if not y_label:
+        y_label = "Travel distance in voxels"
+
+    for record in records:
+        records_rewards.append(generate_rewards_for_trial(record))
+
+    mean = np.zeros(len(truncated_epochs))
+    shift = np.zeros(len(truncated_epochs))
+
+    # Combine same epoch results from multiple trials, and compute mean & std
+    for epoch in truncated_epochs:
+        epoch_rewards = []
+        for record_rewards in records_rewards:
+            epoch_rewards += record_rewards[epoch]
+        mean[epoch - 1] = np.mean(epoch_rewards)
+        shift[epoch - 1] = np.std(epoch_rewards) * 2.576 / np.sqrt(len(epoch_rewards))
     plt.fill_between(
         truncated_epochs,
         mean - shift,
@@ -88,8 +93,7 @@ def draw_reward_curve(records: List[TrialRecord]):
     )
 
     plt.ylim(0, np.max(mean + shift) * 1.1)
-    plt.ylabel("Travel distance in voxels")
-    # plt.ylabel("Volume")
+    plt.ylabel(y_label)
     plt.xlabel("Epoch")
     plt.title("Rewards")
     plt.show()
@@ -97,53 +101,25 @@ def draw_reward_curve(records: List[TrialRecord]):
 
 def draw_separate_reward_curves(records: List[TrialRecord]):
     truncated_epochs = list(range(1, min(record.epochs[-1] for record in records) + 1))
-    reward_curves = np.zeros([len(records), len(truncated_epochs)])
     print(f"show epoch num: {truncated_epochs[-1]}")
-    labels = [
-        "log std bias 1->0",
-        "log std bias 1->0.25",
-        "log std bias 1->0.5",
-        "no bias",
-    ]
-    for record_idx, record in enumerate(records):
-        metrics = generate_reward_metrics_for_trial(record)
-        for epoch in truncated_epochs:
-            # mean
-            reward_curves[record_idx, epoch - 1] = metrics[epoch][0]
-        plt.plot(
-            truncated_epochs,
-            smooth(reward_curves[record_idx, :]),
-            label=labels[record_idx],  # label=f"Record {record_idx}"
-        )
-
-    plt.ylim(0, np.max(reward_curves) * 1.1)
-    plt.ylabel("Travel distance in voxels")
-    # plt.ylabel("Volume")
-    plt.legend()
-    plt.xlabel("Epoch")
-    plt.title("Rewards")
-    plt.show()
-
-
-def draw_separate_reward_curves_with_batch_std(records: List[TrialRecord]):
-    truncated_epochs = list(range(1, min(record.epochs[-1] for record in records) + 1))
-    reward_curves = np.zeros([len(records), len(truncated_epochs), 3])
-    print(f"show epoch num: {truncated_epochs[-1]}")
-    labels = [
-        "log std bias 1->0",
-        "log std bias 1->0.25",
-        "log std bias 1->0.5",
-        "no bias",
-    ]
+    labels = [f"record {i}" for i in range(len(records))]
+    y_label = input('Y label? [default="Travel distance in voxels"]')
+    if not y_label:
+        y_label = "Travel distance in voxels"
+    if input("Customize legend labels? [y/n] ").lower() == "y":
+        for i in range(len(records)):
+            labels[i] = input(f"Legend label for record {i}: ")
     current_curve_max = -np.inf
     for record_idx, record in enumerate(records):
-        metrics = generate_reward_metrics_for_trial(record)
+        record_rewards = generate_rewards_for_trial(record)
+        mean = np.zeros(len(truncated_epochs))
+        shift = np.zeros(len(truncated_epochs))
         for epoch in truncated_epochs:
-            # mean
-            reward_curves[record_idx, epoch - 1] = metrics[epoch][2:]
-        std = reward_curves[record_idx, :, 1]
-        mean = reward_curves[record_idx, :, 0]
-        shift = std * 2.576 / np.sqrt(reward_curves[record_idx, :, 2])
+            epoch_rewards = record_rewards[epoch]
+            mean[epoch - 1] = np.mean(epoch_rewards)
+            shift[epoch - 1] = (
+                np.std(epoch_rewards) * 2.576 / np.sqrt(len(epoch_rewards))
+            )
         plt.fill_between(
             truncated_epochs,
             mean - shift,
@@ -159,8 +135,7 @@ def draw_separate_reward_curves_with_batch_std(records: List[TrialRecord]):
         current_curve_max = max(np.max(mean + shift), current_curve_max)
 
     plt.ylim(0, current_curve_max * 1.1)
-    plt.ylabel("Travel distance in voxels")
-    # plt.ylabel("Volume")
+    plt.ylabel(y_label)
     plt.legend()
     plt.xlabel("Epoch")
     plt.title("Rewards")

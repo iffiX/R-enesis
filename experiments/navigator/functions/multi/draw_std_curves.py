@@ -53,6 +53,10 @@ def compute_std_metrics_for_epoch(epoch_data_file_path):
 
 
 def draw_std_curves(records: List[TrialRecord]):
+    # Note: since std curves evaluates the average std value output by network
+    # we do not combine results from multiple trials epoch-wise since each model
+    # trained in each trial may be very different, we first average std per trial,
+    # then average across trials
     truncated_epochs = list(range(1, min(record.epochs[-1] for record in records) + 1))
     std_curves = []
     print(f"show epoch num: {truncated_epochs[-1]}")
