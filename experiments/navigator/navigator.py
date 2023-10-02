@@ -39,6 +39,9 @@ from experiments.navigator.functions.multi.draw_robot_distance_curves import (
 from experiments.navigator.functions.multi.draw_volume_task_result import (
     draw_volume_task_result,
 )
+from experiments.navigator.functions.multi.draw_shape_task_result import (
+    draw_shape_task_result,
+)
 from experiments.navigator.functions.multi.draw_voxcraft_task_result import (
     draw_voxcraft_task_result,
 )
@@ -184,6 +187,19 @@ if __name__ == "__main__":
                         PromptExecutableWithMultipleChoice(
                             description="Draw volume task result",
                             execute=draw_volume_task_result,
+                            choices=[
+                                (
+                                    f"{trial_record.trial_dir}\n"
+                                    f"    comment: {' '.join(trial_record.comment)}\n"
+                                    f"    reward: {trial_record.max_reward:.3f}",
+                                    trial_record,
+                                )
+                                for trial_record in all_trial_records
+                            ],
+                        ),
+                        PromptExecutableWithMultipleChoice(
+                            description="Draw shape task result",
+                            execute=draw_shape_task_result,
                             choices=[
                                 (
                                     f"{trial_record.trial_dir}\n"

@@ -168,8 +168,14 @@ def visualize_selected_robot(trial_record: TrialRecord, show_epoch: int = -1):
         ),
         "rb",
     ) as file:
-        data = pickle.load(file)
-        data = sorted(data, key=lambda d: d["reward"], reverse=True)
+        data = [d for d in pickle.load(file) if d["voxels"] is not None]
+        original_data = data = sorted(data, key=lambda d: d["reward"], reverse=False)
+        if len(data) > 128:
+            print(
+                "Too many samples in epoch, truncated to top 128 samples with best rewards"
+            )
+            data = data[:128]
+            print(f"Showing {len(data)} samples")
         row_size = int(np.ceil(np.sqrt(len(data) / 2)))
         col_size = row_size * 2
 
@@ -209,6 +215,11 @@ def visualize_selected_robot(trial_record: TrialRecord, show_epoch: int = -1):
         try:
             selected_idx = input("Select robot index to visualize, Ctrl-C to break: ")
             selected_idx = int(selected_idx)
+            if selected_idx > len(data):
+                print(
+                    "Note: you selected a index outside of shown ones, this will work, but not recommended"
+                )
+                data = original_data
         except KeyboardInterrupt:
             return
         except:

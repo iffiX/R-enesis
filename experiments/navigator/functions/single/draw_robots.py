@@ -55,11 +55,11 @@ def draw_robots(trial_record: TrialRecord, show_epoch: int = -1, show_num: int =
             figManager.window.showMaximized()
         except:
             pass
-        fig.set_figheight(4.5 * row_size)
-        fig.set_figwidth(4.5 * col_size)
-        fig.savefig(
-            f"data/generated_data/robots_it_{show_epoch}.pdf",
-            bbox_inches="tight",
-            pad_inches=0.5,
-        )
+        # fig.set_figheight(4.5 * row_size)
+        # fig.set_figwidth(4.5 * col_size)
+        # fig.savefig(
+        #     f"data/generated_data/robots_it_{show_epoch}.pdf",
+        #     bbox_inches="tight",
+        #     pad_inches=0.5,
+        # )
         fig.show()

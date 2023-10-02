@@ -1,51 +1,63 @@
+from ray.rllib.algorithms.ppo import PPOConfig
 from renesis.env.vec_shape import (
+    VectorizedPatchModel,
     ShapeVectorizedPatchEnvironment,
 )
 from experiments.vec_patch_shape.utils import *
 
 dimension_size = (20, 20, 20)
 materials = (0, 1)
-iters = 500
+iters = 1000
 steps = 100
 
 
-workers = 2
-envs = 256
+workers = 1
+envs = 1024
 rollout = 1
 patch_size = 2
 
-config = {
-    "env": ShapeVectorizedPatchEnvironment,
-    "env_config": {
+example_env_model = VectorizedPatchModel(
+    materials=materials,
+    dimension_size=dimension_size,
+    patch_size=patch_size,
+    max_patch_num=steps,
+    env_num=envs,
+    device="cpu",
+)
+
+config = PPOConfig()
+config.environment(
+    env=ShapeVectorizedPatchEnvironment,
+    action_space=example_env_model.action_space,
+    observation_space=example_env_model.observation_space,
+    env_config={
         "debug": False,
         "dimension_size": dimension_size,
         "materials": materials,
         "max_patch_num": steps,
         "patch_size": patch_size,
         "max_steps": steps,
-        "reward_type": "volume",
+        "reward_type": "shape_copy_f1",
+        # below option is only effective when reward_type=shape_copy_(recall/precision/f1)
+        "reward_reference": os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "data", "shapes", "dog.npy"
+        ),
         "voxel_size": 0.01,
         "normalize_mode": "clip",
         "num_envs": envs,
     },
-    "normalize_actions": False,
-    "disable_env_checking": True,
-    "render_env": False,
-    "sgd_minibatch_size": 128,
-    "num_sgd_iter": int(100 * 128 / envs),
-    "train_batch_size": steps * workers * envs * rollout,
-    "lr": 1e-4,
-    "rollout_fragment_length": steps,
-    "vf_clip_param": 10**5,
-    "seed": 635326,
-    "num_workers": workers,
-    "num_gpus": 1,
-    "num_gpus_per_worker": 1,
-    "num_envs_per_worker": envs,
-    "num_cpus_per_worker": 1,
-    "framework": "torch",
-    "evaluation_interval": None,
-    "model": {
+    render_env=False,
+    disable_env_checking=True,
+    normalize_actions=False,
+)
+config.training(
+    lr=1e-4,
+    gamma=0.99,
+    train_batch_size=steps * workers * envs * rollout,
+    vf_clip_param=10**5,
+    sgd_minibatch_size=128,
+    num_sgd_iter=10,
+    model={
         "custom_model": "actor_model",
         "max_seq_len": steps,
         "custom_model_config": {
@@ -57,5 +69,16 @@ config = {
             "initial_std_bias_in_voxels": 0,
         },
     },
-    "callbacks": CustomCallbacks,
-}
+)
+config.evaluation(
+    evaluation_interval=None,
+)
+config.debugging(seed=145345)
+config.rollouts(
+    num_rollout_workers=workers if workers > 1 else 0,
+    num_envs_per_worker=envs,
+    rollout_fragment_length=steps,
+)
+config.resources(num_gpus=1, num_cpus_per_worker=12, num_gpus_per_worker=1)
+config.framework(framework="torch")
+config.callbacks(CustomCallbacks)

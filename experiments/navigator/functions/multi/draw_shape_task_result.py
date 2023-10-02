@@ -1,0 +1,140 @@
+import os
+import pickle
+import numpy as np
+import matplotlib.pyplot as plt
+from typing import List
+from renesis.utils.robot import get_robot_voxels_from_voxels
+from experiments.navigator.trial import TrialRecord
+from experiments.navigator.functions.multi.draw_reward_curves import (
+    generate_rewards_for_trial,
+    smooth,
+)
+from renesis.utils.shape_decomposition import ShapeDecomposition
+
+divide_colors = ["orangered", "orange", "gold", "green", "skyblue", "darkviolet"]
+divide_points = [0, 0.1, 0.2, 0.4, 0.6, 1]
+segment_colors = ["blue", "red", "green", "grey", "gold"]
+
+
+def draw_shape_task_result(
+    records: List[TrialRecord],
+):
+    fig, axd = plt.subplot_mosaic(
+        [
+            ["reward", "0", "1", "2"],
+            ["reward", "3", "4", "5"],
+        ],
+        figsize=(12.5, 5),
+        gridspec_kw={"width_ratios": [2, 1, 1, 1]},
+        layout="constrained",
+        per_subplot_kw={
+            "reward": {},
+            "0": {"projection": "3d"},
+            "1": {"projection": "3d"},
+            "2": {"projection": "3d"},
+            "3": {"projection": "3d"},
+            "4": {"projection": "3d"},
+            "5": {"projection": "3d"},
+        },
+    )
+
+    truncated_epochs = list(range(1, min(record.epochs[-1] for record in records) + 1))
+    print(f"show epoch num: {truncated_epochs[-1]}")
+    records_rewards = []
+    for record in records:
+        records_rewards.append(generate_rewards_for_trial(record))
+
+    mean = np.zeros(len(truncated_epochs))
+    shift = np.zeros(len(truncated_epochs))
+    # Combine same epoch results from multiple trials, and compute mean & std
+    all_rewards = []
+    for epoch in truncated_epochs:
+        epoch_rewards = []
+        for record_rewards in records_rewards:
+            epoch_rewards += record_rewards[epoch]
+        mean[epoch - 1] = np.mean(epoch_rewards)
+        shift[epoch - 1] = np.std(epoch_rewards) * 2.576 / np.sqrt(len(epoch_rewards))
+        all_rewards.append(epoch_rewards)
+    # axd["reward"].fill_between(
+    #     truncated_epochs,
+    #     mean - shift,
+    #     mean + shift,
+    #     color="lightgrey",
+    # )
+    # axd["reward"].plot(
+    #     truncated_epochs,
+    #     smooth(mean),
+    #     color="grey",
+    # )
+
+    y_limit = np.max(mean + shift) * 1.1
+    axd["reward"].set_ylim(0, y_limit)
+    axd["reward"].set_xlabel("Epoch", fontsize=15)
+    axd["reward"].set_ylabel("Segment Number", fontsize=15)
+    axd["reward"].xaxis.set_tick_params(labelsize=14)
+    axd["reward"].yaxis.set_tick_params(labelsize=14)
+    for divide_idx, (divide_color, divide_point) in enumerate(
+        zip(divide_colors, divide_points)
+    ):
+        epoch_idx = int(divide_point * (len(truncated_epochs) - 1))
+        show_epoch = truncated_epochs[epoch_idx]
+        all_data = []
+        for record in records:
+            with open(
+                os.path.join(
+                    record.data_dir,
+                    record.epoch_files[show_epoch].data_file_name,
+                ),
+                "rb",
+            ) as file:
+                all_data += pickle.load(file)
+        # data = sorted(
+        #     all_data,
+        #     key=lambda d: np.abs(d["reward"] - mean[show_epoch - 1]),
+        # )[0]
+        data = sorted(all_data, key=lambda d: d["reward"], reverse=True)[0]
+        print(f"{show_epoch} {mean[show_epoch - 1]}")
+        key = str(divide_idx)
+        axd[key].set_title(f"Segment Number={int(data['reward'])}", y=-0.15)
+        axd[key].set_xticks([])
+        axd[key].set_yticks([])
+        axd[key].set_zticks([])
+
+        robot_voxels, robot_occupied = get_robot_voxels_from_voxels(data["voxels"])
+        sd = ShapeDecomposition(robot_voxels, kernel_size=2)
+        colors = np.empty(robot_voxels.shape, dtype=object)
+        for i, segment in enumerate(sd.get_segments()):
+            colors[segment] = segment_colors[i % len(segment_colors)]
+        axd[key].voxels(robot_occupied, facecolors=colors, edgecolors=(1, 1, 1, 0.7))
+        axd[key].axis("equal")
+        axd[key].text2D(
+            0.05,
+            0.95,
+            chr(int(key) + ord("A")),
+            transform=axd[key].transAxes,
+            color="black",
+            fontsize=15,
+            verticalalignment="top",
+        )
+        axd["reward"].plot(
+            [show_epoch], [data["reward"]], marker="o", color=divide_color
+        )
+        axd["reward"].axvline(
+            x=show_epoch,
+            ymin=0,
+            ymax=data["reward"] / y_limit,
+            color=divide_color,
+            linestyle="--",
+        )
+        axd["reward"].text(
+            show_epoch,
+            data["reward"] + 15,
+            chr(int(key) + ord("A")),
+            fontsize=12,
+        )
+    fig.savefig(
+        f"generated_data/shape.pdf",
+        bbox_inches="tight",
+        pad_inches=0,
+    )
+    fig.show()

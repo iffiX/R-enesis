@@ -10,6 +10,8 @@ from renesis.env_model.vec_patch import (
     VectorizedPatchSphereModel,
 )
 from renesis.utils.metrics import get_volume, get_bounding_box_sizes
+from renesis.utils.shape_decomposition import ShapeDecomposition
+from renesis.utils.debug import enable_debugger
 
 
 class ShapeBaseEnvironmentForVecEnvModel(VectorEnv):
@@ -23,6 +25,8 @@ class ShapeBaseEnvironmentForVecEnvModel(VectorEnv):
         self.observation_space = vec_env_model.observation_space
         self.reward_range = (0, float("inf"))
         self.reward_type = config["reward_type"]
+        if self.reward_type.startswith("shape_copy"):
+            self.reward_reference = np.load(config["reward_reference"])
         self.voxel_size = config["voxel_size"]
 
         self.end_rewards = [0 for _ in range(config["num_envs"])]
@@ -87,6 +91,30 @@ class ShapeBaseEnvironmentForVecEnvModel(VectorEnv):
                 self.end_rewards[idx] = get_volume(voxels)
             elif self.reward_type == "height":
                 self.end_rewards[idx] = get_bounding_box_sizes(voxels)[2]
+            elif self.reward_type == "shape":
+                sd = ShapeDecomposition(voxels, kernel_size=2)
+                self.end_rewards[idx] = len(sd.get_segments())
+            elif self.reward_type.startswith("shape_copy"):
+                assert self.reward_reference.shape == voxels.shape
+                correct_num = np.sum(
+                    np.logical_and(
+                        self.reward_reference != 0,
+                        voxels == self.reward_reference,
+                    )
+                )
+                if self.reward_type == "shape_copy_recall":
+                    reward = (
+                        10 * correct_num / (np.sum(self.reward_reference != 0) + 1e-3)
+                    )
+                elif self.reward_type == "shape_copy_precision":
+                    reward = 10 * correct_num / (np.sum(voxels != 0) + 1e-3)
+                elif self.reward_type == "shape_copy_f1":
+                    recall = correct_num / (np.sum(self.reward_reference != 0) + 1e-3)
+                    precision = correct_num / (np.sum(voxels != 0) + 1e-3)
+                    reward = 20 * precision * recall / (precision + recall + 1e-3)
+                else:
+                    raise Exception(f"Unknown reward type: {self.reward_type}")
+                self.end_rewards[idx] = reward
             else:
                 raise Exception(f"Unknown reward type: {self.reward_type}")
         self.end_rewards = [

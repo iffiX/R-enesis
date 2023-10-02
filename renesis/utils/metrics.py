@@ -187,7 +187,7 @@ def get_surface_voxels(X):
         # shape [3, 6, X_space_size]
         neighbor_coords = coords + offsets
         # Note: includes voxels of a internal hole surface
-        # shape [6, X_space_size]
+        # shape [X_space_size]
         neighbor_is_empty = np.any(
             padded_X[neighbor_coords[0], neighbor_coords[1], neighbor_coords[2]] == 0,
             axis=0,
@@ -217,7 +217,7 @@ def get_surface_area(X):
     )
     # shape [3, 6, X_space_size]
     neighbor_coords = coords + offsets
-    # shape [6, X_space_size]
+    # shape [X_space_size]
     neighbor_is_empty = (
         padded_X[neighbor_coords[0], neighbor_coords[1], neighbor_coords[2]] == 0,
     )
